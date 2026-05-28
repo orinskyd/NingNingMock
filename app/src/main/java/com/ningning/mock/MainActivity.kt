@@ -169,23 +169,13 @@ class MainActivity : AppCompatActivity() {
     /**
      * Android 系统内置 Geocoder 反向地理编码
      * 优点：不需要 API key，不需要网络（部分手机离线可用）
+     * 阻塞式 getFromLocation，所有版本都支持
      */
     @Suppress("DEPRECATION")
     private fun reverseGeocodeSystem(lat: Double, lng: Double): String? {
         return try {
             val geocoder = Geocoder(this, Locale.CHINA)
-            val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                // Android 13+ 用新 API
-                val results = mutableListOf<android.location.Address>()
-                val listener = Geocoder.GeocodeListener { addrs ->
-                    results.addAll(addrs)
-                }
-                geocoder.getFromLocation(lat, lng, 1, listener)
-                Thread.sleep(500) // 等待回调
-                results.firstOrNull()
-            } else {
-                geocoder.getFromLocation(lat, lng, 1)?.firstOrNull()
-            }
+            val addresses = geocoder.getFromLocation(lat, lng, 1)?.firstOrNull()
             addresses?.let { addr ->
                 val parts = mutableListOf<String>()
                 addr.locality?.let { parts.add(it) }
@@ -323,29 +313,14 @@ class MainActivity : AppCompatActivity() {
     /**
      * 方法1: Android 系统内置 Geocoder
      * 优点：不需要 API key，在中国手机上通常使用高德/百度后端
+     * 全部使用阻塞式 API（支持所有版本），在线程中调用没问题
      */
     @Suppress("DEPRECATION")
     private fun searchViaGeocoder(query: String): List<SearchResult>? {
         return try {
             val geocoder = Geocoder(this, Locale.CHINA)
-            // isPresent 只在 Android 13+ 可用，低版本直接尝试
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !geocoder.isPresent) {
-                Log.d("Search", "Geocoder not present on this device")
-                return null
-            }
-
-            val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val results = mutableListOf<android.location.Address>()
-                val listener = Geocoder.GeocodeListener { addrs ->
-                    results.addAll(addrs)
-                }
-                geocoder.getFromLocationName(query, 10, listener)
-                Thread.sleep(2000) // 等待回调
-                results
-            } else {
-                geocoder.getFromLocationName(query, 10) ?: emptyList()
-            }
-
+            // 阻塞式 getFromLocationName，所有 Android 版本都支持
+            val addresses = geocoder.getFromLocationName(query, 10) ?: emptyList()
             if (addresses.isEmpty()) {
                 Log.d("Search", "Geocoder returned 0 addresses")
                 return null
