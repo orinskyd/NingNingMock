@@ -103,7 +103,7 @@ class MainActivity : AppCompatActivity() {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             controller.setZoom(14.0)
-            controller.setCenter(GeoPoint(28.0746, 119.1456)) // 龙泉市中心
+            controller.setCenter(GeoPoint(28.0, 120.67)) // 温州市中心
             minZoomLevel = 4.0
             maxZoomLevel = 20.0
 
@@ -265,6 +265,8 @@ class MainActivity : AppCompatActivity() {
         binding.progressSearch.visibility = View.VISIBLE
 
         Thread {
+            var amapFailed = ""
+            var nomFailed = ""
             try {
                 // 1. 先试高德
                 val encodedQuery = URLEncoder.encode(query, "UTF-8")
@@ -278,6 +280,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     return@Thread
                 }
+                amapFailed = "高德无结果"
 
                 // 2. 高德没结果或失败，降级到 Nominatim
                 val nomResults = tryNominatimSearch(query)
@@ -288,15 +291,15 @@ class MainActivity : AppCompatActivity() {
                     if (nomResults.isNotEmpty()) {
                         showSearchResults(nomResults, "OpenStreetMap")
                     } else {
-                        Toast.makeText(this, "未找到结果，请尝试更具体的关键词", Toast.LENGTH_SHORT).show()
+                        nomFailed = "Nominatim无结果"
+                        Toast.makeText(this, "未找到结果（$amapFailed，$nomFailed）\n请检查网络后重试", Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     binding.btnSearch.isEnabled = true
                     binding.progressSearch.visibility = View.GONE
-                    val msg = e.message ?: "未知错误"
-                    Toast.makeText(this, "搜索出错: $msg", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "搜索出错: ${e.message}\n请检查网络连接", Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
@@ -306,32 +309,40 @@ class MainActivity : AppCompatActivity() {
      * 高德 POI 搜索（返回null表示失败）
      */
     private fun tryAmapSearch(encodedQuery: String): List<SearchResult>? {
+        var conn: java.net.HttpURLConnection? = null
         return try {
             val url = "https://restapi.amap.com/v3/place/text" +
                     "?key=$amapKey&keywords=$encodedQuery" +
                     "&city=温州&citylimit=true" +
                     "&children=1&offset=10&page=1&extensions=all&output=json"
-            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 5000
             conn.readTimeout = 5000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.4")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.6")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
                 // 高德不可用
+                android.util.Log.w("Search", "高德返回HTTP $responseCode")
                 return null
             }
 
             val result = conn.inputStream.bufferedReader().readText()
+            android.util.Log.d("Search", "高德响应: ${result.take(200)}")
 
             // 检查返回状态
             if (result.contains("\"status\":\"0\"")) {
+                val info = extractJsonStr(result, "\"info\":\"") ?: "未知"
+                android.util.Log.w("Search", "高德搜索失败: $info")
                 return null
             }
 
             parseAmapResults(result)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("Search", "高德搜索异常", e)
             null // 网络不通或超时，返回null让调用方降级
+        } finally {
+            conn?.disconnect()
         }
     }
 
@@ -340,25 +351,34 @@ class MainActivity : AppCompatActivity() {
      */
     private fun tryNominatimSearch(query: String): List<SearchResult> {
         val results = mutableListOf<SearchResult>()
+        var conn: java.net.HttpURLConnection? = null
         return try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            // 限定温州区域：纬度27.0~28.5，经度120.0~121.5
+            // 限定温州区域：viewbox格式 left,top,right,bottom
             val url = "https://nominatim.openstreetmap.org/search" +
                     "?q=$encodedQuery&format=json&limit=10" +
-                    "&bounded=1&viewbox=119.8,28.5,121.2,27.0&accept-language=zh-CN"
-            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                    "&bounded=1&viewbox=119.5,28.8,121.5,27.0&accept-language=zh-CN"
+            conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.4")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.6")
             val responseCode = conn.responseCode
 
-            if (responseCode != 200) return results
+            if (responseCode != 200) {
+                android.util.Log.w("Search", "Nominatim返回HTTP $responseCode")
+                return results
+            }
 
             val result = conn.inputStream.bufferedReader().readText()
+            android.util.Log.d("Search", "Nominatim响应: ${result.take(200)}")
             parseNominatimResults(result)
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.e("Search", "Nominatim搜索异常", e)
             results
+        } finally {
+            conn?.disconnect()
         }
+    }
     }
 
     /**
@@ -521,11 +541,37 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 开始 GPS 模拟
-     * 不做前置检查，直接启动Service尝试注册Provider
-     * 如果Provider注册失败，由Service返回错误信息，再弹窗提示用户
+     * 开始 GPS 模拟（带前置检查和WiFi警告）
      */
     private fun startMocking() {
+        // 检查WiFi状态，提醒用户关闭
+        val wifiManager = getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+        if (wifiManager.isWifiEnabled) {
+            AlertDialog.Builder(this)
+                .setTitle("⚠️ 请先关闭WiFi")
+                .setMessage(
+                    "检测到WiFi处于开启状态。\n\n" +
+                    "钉钉、高德等APP会通过WiFi扫描获取真实位置，\n" +
+                    "即使模拟了GPS，它们仍然能知道你的真实地址。\n\n" +
+                    "请手动关闭WiFi后再开始模拟。\n\n" +
+                    "操作路径：下拉通知栏 → 关闭WiFi\n\n" +
+                    "关闭WiFi后点击「已关闭，开始模拟」"
+                )
+                .setPositiveButton("已关闭，开始模拟") { _, _ ->
+                    doStartMockService()
+                }
+                .setNegativeButton("取消", null)
+                .setCancelable(false)
+                .show()
+        } else {
+            doStartMockService()
+        }
+    }
+
+    /**
+     * 实际启动模拟服务
+     */
+    private fun doStartMockService() {
         val intent = Intent(this, MockLocationService::class.java).apply {
             putExtra(MockLocationService.EXTRA_LAT, selectedLat)
             putExtra(MockLocationService.EXTRA_LNG, selectedLng)
@@ -555,6 +601,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // 至少一个Provider成功了
                     Toast.makeText(this, "模拟已启动！GPS:${if(status.gpsRegistered) "✓" else "✗"} NET:${if(status.networkRegistered) "✓" else "✗"}", Toast.LENGTH_SHORT).show()
+                    showMockTips()
                 }
             }
         }, 1500)
@@ -584,6 +631,32 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("知道了", null)
             .setCancelable(false)
+            .show()
+    }
+
+    /**
+     * 显示模拟使用提示（首次启动成功时）
+     */
+    private fun showMockTips() {
+        if (prefs.getBoolean("mock_tips_shown_v2", false)) return
+        prefs.edit().putBoolean("mock_tips_shown_v2", true).apply()
+        AlertDialog.Builder(this)
+            .setTitle("模拟已启动 ✓")
+            .setMessage(
+                "模拟正在运行中，请注意以下几点：\n\n" +
+                "1. ⚠️ 必须关闭WiFi！\n" +
+                "   钉钉、高德等APP通过WiFi扫描获取真实位置，\n" +
+                "   WiFi开着的话模拟无效。\n\n" +
+                "2. 关闭目标APP后重新打开\n" +
+                "   已在运行的APP可能缓存了旧位置，\n" +
+                "   切到后台杀掉再重新打开才能生效。\n\n" +
+                "3. 部分APP可能仍检测到真实位置\n" +
+                "   如钉钉使用阿里自研定位SDK，\n" +
+                "   有自己的检测机制，不一定能完全模拟。\n\n" +
+                "4. 模拟期间请保持本APP在后台运行\n" +
+                "   不要从最近任务中划掉本APP。"
+            )
+            .setPositiveButton("我知道了", null)
             .show()
     }
 
@@ -619,8 +692,17 @@ class MainActivity : AppCompatActivity() {
     private fun updateStatus() {
         if (serviceBound && mockService != null) {
             val s = mockService!!.getStatus()
-            binding.tvStatus.text = "推送: ${s.pushCount}次 | GPS:${if(s.gpsRegistered) "✓" else "✗"} NET:${if(s.networkRegistered) "✓" else "✗"}"
-            binding.tvWifiStatus.text = if (s.wifiEnabled) "WiFi: 开启 ⚠️ 请手动关闭" else "WiFi: 已关闭 ✓"
+            var statusText = "推送: ${s.pushCount}次 | GPS:${if(s.gpsRegistered) "✓" else "✗"} NET:${if(s.networkRegistered) "✓" else "✗"}"
+            binding.tvStatus.text = statusText
+
+            // WiFi警告
+            if (s.wifiEnabled) {
+                binding.tvWifiStatus.text = "⚠️ WiFi开启中！目标APP可能检测到真实位置，请关闭WiFi"
+                binding.tvWifiStatus.setTextColor(getColor(android.R.color.holo_orange_dark))
+            } else {
+                binding.tvWifiStatus.text = "WiFi: 已关闭 ✓"
+                binding.tvWifiStatus.setTextColor(getColor(android.R.color.holo_green_dark))
+            }
         }
     }
 

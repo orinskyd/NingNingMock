@@ -65,16 +65,23 @@ class MockLocationService : Service() {
         }
 
         lastError = null
+
+        // FIX v1.5: 必须在onStartCommand中立即调用startForeground
+        // Android 9+ 要求 startForegroundService 后5秒内必须调用 startForeground，
+        // 否则系统会直接杀死APP（闪退）
+        startForeground(NOTIFICATION_ID, buildNotification())
+
         val success = startMocking()
         if (!success) {
-            // 启动失败，停止Service
-            stopSelf()
+            // Provider注册失败，更新通知显示错误（不要stopSelf，让Activity来处理）
+            showErrorNotification()
         }
         return START_NOT_STICKY
     }
 
     /**
      * 开始模拟：注册Provider + 推送循环
+     * 注意：startForeground 已在 onStartCommand 中调用，此处不再重复调用
      * @return true = 成功, false = 失败
      */
     private fun startMocking(): Boolean {
@@ -94,8 +101,7 @@ class MockLocationService : Service() {
             return false
         }
 
-        // 前台通知
-        startForeground(NOTIFICATION_ID, buildNotification())
+        // 前台通知已在 onStartCommand 中调用
 
         LocationHooks.updateLastPosition(currentLat, currentLng)
 
@@ -291,6 +297,18 @@ class MockLocationService : Service() {
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+    }
+
+    private fun showErrorNotification() {
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("模拟启动失败")
+            .setContentText(lastError ?: "请检查开发者选项设置")
+            .setSmallIcon(android.R.drawable.ic_menu_compass)
+            .setOngoing(false)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+        val manager = getSystemService(NotificationManager::class.java)
+        manager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun updateNotification() {

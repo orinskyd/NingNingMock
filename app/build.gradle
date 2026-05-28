@@ -11,8 +11,8 @@ android {
         applicationId "com.ningning.mock"
         minSdk 23
         targetSdk 34
-        versionCode 14
-        versionName "1.4"
+        versionCode 16
+        versionName "1.6"
     }
 
     buildTypes {
