@@ -328,7 +328,8 @@ class MainActivity : AppCompatActivity() {
     private fun searchViaGeocoder(query: String): List<SearchResult>? {
         return try {
             val geocoder = Geocoder(this, Locale.CHINA)
-            if (!geocoder.isPresent) {
+            // isPresent 只在 Android 13+ 可用，低版本直接尝试
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !geocoder.isPresent) {
                 Log.d("Search", "Geocoder not present on this device")
                 return null
             }
