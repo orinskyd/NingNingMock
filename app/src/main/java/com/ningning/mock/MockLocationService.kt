@@ -8,6 +8,7 @@ import android.location.Location
 import android.location.LocationManager
 import android.os.*
 import android.provider.Settings
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlin.random.Random
 
@@ -19,14 +20,17 @@ class MockLocationService : Service() {
 
     private val GPS_PROVIDER = LocationManager.GPS_PROVIDER
     private val NETWORK_PROVIDER = LocationManager.NETWORK_PROVIDER
+    private val FUSED_PROVIDER = "fused"
+    private val PASSIVE_PROVIDER = LocationManager.PASSIVE_PROVIDER
 
     private var currentLat = 0.0
     private var currentLng = 0.0
     private var pushCount = 0L
     private var gpsRegistered = false
     private var networkRegistered = false
+    private var fusedRegistered = false
+    private var passiveRegistered = false
 
-    // 错误信息
     @Volatile var lastError: String? = null
         private set
 
@@ -65,43 +69,32 @@ class MockLocationService : Service() {
         }
 
         lastError = null
-
-        // FIX v1.5: 必须在onStartCommand中立即调用startForeground
-        // Android 9+ 要求 startForegroundService 后5秒内必须调用 startForeground，
-        // 否则系统会直接杀死APP（闪退）
         startForeground(NOTIFICATION_ID, buildNotification())
 
         val success = startMocking()
         if (!success) {
-            // Provider注册失败，更新通知显示错误（不要stopSelf，让Activity来处理）
             showErrorNotification()
         }
         return START_NOT_STICKY
     }
 
-    /**
-     * 开始模拟：注册Provider + 推送循环
-     * 注意：startForeground 已在 onStartCommand 中调用，此处不再重复调用
-     * @return true = 成功, false = 失败
-     */
     private fun startMocking(): Boolean {
         if (isRunning) return true
 
-        // WiFi控制
         wifiController.disableForMock()
 
-        // 直接尝试注册Provider，不提前检查权限
-        // 如果权限不对，registerProvider会抛SecurityException，我们捕获后报错
         val gpsOk = registerProvider(GPS_PROVIDER)
         val netOk = registerProvider(NETWORK_PROVIDER)
+        val fusedOk = tryRegisterExtra(FUSED_PROVIDER)
+        val passiveOk = tryRegisterExtra(PASSIVE_PROVIDER)
+
+        Log.d("MockService", "GPS=$gpsOk NET=$netOk FUSED=$fusedOk PASSIVE=$passiveOk")
 
         if (!gpsOk && !netOk) {
-            lastError = lastError ?: "Provider注册失败，请确认已在开发者选项中将「宁宁模拟」设为模拟位置应用"
+            lastError = lastError ?: "Provider注册失败，请确认已在开发者选项中将宁宁模拟设为模拟位置应用"
             wifiController.restoreWifiState()
             return false
         }
-
-        // 前台通知已在 onStartCommand 中调用
 
         LocationHooks.updateLastPosition(currentLat, currentLng)
 
@@ -111,51 +104,20 @@ class MockLocationService : Service() {
         return true
     }
 
-    /**
-     * 检查是否设置了正确的模拟位置应用
-     * 兼容 Android 14+ ：Settings.Secure.mock_location 可能返回 "0" 或其他值
-     * 优先通过 AppOpsManager 检查
-     */
-    private fun checkMockPermission(): Boolean {
-        // 方式1: AppOpsManager 检查（最可靠）
-        try {
-            val appOps = getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
-            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                appOps.unsafeCheckOpNoThrow(
-                    "android:mock_location",
-                    android.os.Process.myUid(),
-                    packageName
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                appOps.checkOp(
-                    "android:mock_location",
-                    android.os.Process.myUid(),
-                    packageName
-                )
-            }
-            if (result == android.app.AppOpsManager.MODE_ALLOWED) return true
-        } catch (_: Exception) {}
-
-        // 方式2: Settings.Secure 回退检查
+    private fun tryRegisterExtra(provider: String): Boolean {
         return try {
-            val mockApp = Settings.Secure.getString(contentResolver, "mock_location")
-            mockApp == packageName
-        } catch (_: Exception) {
-            true // 无法读取时继续尝试
+            registerProvider(provider)
+        } catch (e: Exception) {
+            Log.d("MockService", "Extra provider $provider failed: ${e.message}")
+            false
         }
     }
 
-    /**
-     * 注册 Mock Provider
-     * @return true = 成功
-     */
     private fun registerProvider(provider: String): Boolean {
         return try {
             try { locationManager.removeTestProvider(provider) } catch (_: Exception) {}
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // Android 12+ 使用反射调用新版API
                 val builderClass = Class.forName("android.location.provider.ProviderProperties\$Builder")
                 val builder = builderClass.getConstructor().newInstance()
                 builderClass.getMethod("setHasAltitudeSupport", Boolean::class.java).invoke(builder, true)
@@ -178,66 +140,57 @@ class MockLocationService : Service() {
 
             locationManager.setTestProviderEnabled(provider, true)
 
-            if (provider == GPS_PROVIDER) gpsRegistered = true
-            else networkRegistered = true
+            when (provider) {
+                GPS_PROVIDER -> gpsRegistered = true
+                NETWORK_PROVIDER -> networkRegistered = true
+                FUSED_PROVIDER -> fusedRegistered = true
+                PASSIVE_PROVIDER -> passiveRegistered = true
+            }
 
+            Log.d("MockService", "Provider registered: $provider")
             true
         } catch (e: SecurityException) {
-            // 模拟位置应用未设置
             lastError = "SecurityException: 请在开发者选项中设置模拟位置应用"
             false
         } catch (e: Exception) {
+            Log.d("MockService", "Provider $provider error: ${e.message}")
             lastError = "Provider注册异常: ${e.message}"
             false
         }
     }
 
-    /**
-     * 推送位置
-     */
     private fun pushLocation() {
         if (!isRunning) return
         pushCount++
 
         val (driftedLat, driftedLng) = LocationHooks.applyDrift(currentLat, currentLng)
 
-        if (gpsRegistered) {
-            val gpsLoc = LocationHooks.buildRealisticLocation(GPS_PROVIDER, driftedLat, driftedLng)
-            try {
-                locationManager.setTestProviderLocation(GPS_PROVIDER, gpsLoc)
-            } catch (e: Exception) {
-                // Provider可能被系统移除了，尝试重新注册
-                if (e is IllegalArgumentException || e is SecurityException) {
-                    gpsRegistered = false
-                    if (registerProvider(GPS_PROVIDER)) {
-                        try {
-                            locationManager.setTestProviderLocation(GPS_PROVIDER, gpsLoc)
-                        } catch (_: Exception) {}
-                    }
-                }
-            }
-        }
-
-        if (networkRegistered) {
-            val netLoc = LocationHooks.buildRealisticLocation(NETWORK_PROVIDER, driftedLat, driftedLng)
-            try {
-                locationManager.setTestProviderLocation(NETWORK_PROVIDER, netLoc)
-            } catch (e: Exception) {
-                if (e is IllegalArgumentException || e is SecurityException) {
-                    networkRegistered = false
-                    if (registerProvider(NETWORK_PROVIDER)) {
-                        try {
-                            locationManager.setTestProviderLocation(NETWORK_PROVIDER, netLoc)
-                        } catch (_: Exception) {}
-                    }
-                }
-            }
-        }
+        pushToProvider(GPS_PROVIDER, gpsRegistered, driftedLat, driftedLng)
+        pushToProvider(NETWORK_PROVIDER, networkRegistered, driftedLat, driftedLng)
+        pushToProvider(FUSED_PROVIDER, fusedRegistered, driftedLat, driftedLng)
+        pushToProvider(PASSIVE_PROVIDER, passiveRegistered, driftedLat, driftedLng)
 
         LocationHooks.updateLastPosition(currentLat, currentLng)
 
         if (pushCount % 20 == 0L) {
             updateNotification()
+        }
+    }
+
+    private fun pushToProvider(provider: String, registered: Boolean, lat: Double, lng: Double) {
+        if (!registered) return
+        val loc = LocationHooks.buildRealisticLocation(provider, lat, lng)
+        try {
+            locationManager.setTestProviderLocation(provider, loc)
+        } catch (e: Exception) {
+            if (e is IllegalArgumentException || e is SecurityException) {
+                Log.d("MockService", "Re-registering $provider")
+                if (registerProvider(provider)) {
+                    try {
+                        locationManager.setTestProviderLocation(provider, loc)
+                    } catch (_: Exception) {}
+                }
+            }
         }
     }
 
@@ -247,8 +200,12 @@ class MockLocationService : Service() {
 
         try { locationManager.removeTestProvider(GPS_PROVIDER) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(NETWORK_PROVIDER) } catch (_: Exception) {}
+        try { locationManager.removeTestProvider(FUSED_PROVIDER) } catch (_: Exception) {}
+        try { locationManager.removeTestProvider(PASSIVE_PROVIDER) } catch (_: Exception) {}
         gpsRegistered = false
         networkRegistered = false
+        fusedRegistered = false
+        passiveRegistered = false
 
         wifiController.restoreWifiState()
 
@@ -264,6 +221,8 @@ class MockLocationService : Service() {
             pushCount = pushCount,
             gpsRegistered = gpsRegistered,
             networkRegistered = networkRegistered,
+            fusedRegistered = fusedRegistered,
+            passiveRegistered = passiveRegistered,
             wifiEnabled = wifiController.isWifiEnabled(),
             mockLocationApp = getMockLocationApp(),
             error = lastError
@@ -312,9 +271,15 @@ class MockLocationService : Service() {
     }
 
     private fun updateNotification() {
+        var providerInfo = "GPS"
+        if (gpsRegistered) providerInfo += "+"
+        if (networkRegistered) providerInfo += "NET"
+        if (fusedRegistered) providerInfo += "+FUSED"
+        if (passiveRegistered) providerInfo += "+PAS"
+
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("位置服务运行中")
-            .setContentText("已推送 ${pushCount}次 | " +
+            .setContentText("已推送 ${pushCount}次 [$providerInfo] " +
                     "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
@@ -328,6 +293,8 @@ class MockLocationService : Service() {
         handler.removeCallbacks(pushRunnable)
         try { locationManager.removeTestProvider(GPS_PROVIDER) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(NETWORK_PROVIDER) } catch (_: Exception) {}
+        try { locationManager.removeTestProvider(FUSED_PROVIDER) } catch (_: Exception) {}
+        try { locationManager.removeTestProvider(PASSIVE_PROVIDER) } catch (_: Exception) {}
         wifiController.restoreWifiState()
         super.onDestroy()
     }
@@ -339,6 +306,8 @@ class MockLocationService : Service() {
         val pushCount: Long,
         val gpsRegistered: Boolean,
         val networkRegistered: Boolean,
+        val fusedRegistered: Boolean,
+        val passiveRegistered: Boolean,
         val wifiEnabled: Boolean,
         val mockLocationApp: String,
         val error: String? = null

@@ -16,6 +16,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
+import android.util.Log
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
@@ -42,17 +43,14 @@ class MainActivity : AppCompatActivity() {
     private var serviceBound = false
     private var isMocking = false
 
-    // 高德API Key（已内置，用户也可自行更换）
     private val DEFAULT_AMAP_KEY = "77307996c1d945194fdafea3c683ce5d"
     private var amapKey = DEFAULT_AMAP_KEY
 
-    // 地图相关
     private var currentMarker: Marker? = null
     private var selectedLat = 0.0
     private var selectedLng = 0.0
     private var searchMarker: Marker? = null
 
-    // 状态刷新
     private val handler = Handler(Looper.getMainLooper())
     private var statusRunnable: Runnable? = null
 
@@ -80,7 +78,6 @@ class MainActivity : AppCompatActivity() {
         prefs = getSharedPreferences("ningning_prefs", Context.MODE_PRIVATE)
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
-        // 初始化 osmdroid
         Configuration.getInstance().apply {
             userAgentValue = packageName
             osmdroidBasePath = filesDir
@@ -95,15 +92,12 @@ class MainActivity : AppCompatActivity() {
         setupSearch()
     }
 
-    /**
-     * 配置 osmdroid 地图
-     */
     private fun setupMap() {
         binding.mapView.apply {
             setTileSource(TileSourceFactory.MAPNIK)
             setMultiTouchControls(true)
             controller.setZoom(14.0)
-            controller.setCenter(GeoPoint(28.0, 120.67)) // 温州市中心
+            controller.setCenter(GeoPoint(28.0, 120.67))
             minZoomLevel = 4.0
             maxZoomLevel = 20.0
 
@@ -122,9 +116,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 地图点击选点
-     */
     private fun onMapClick(point: GeoPoint) {
         if (isMocking) {
             Toast.makeText(this, "请先停止模拟再选点", Toast.LENGTH_SHORT).show()
@@ -158,23 +149,9 @@ class MainActivity : AppCompatActivity() {
         reverseGeocode(lat, lng)
     }
 
-    /**
-     * 反向地理编码 — 优先用高德，降级用 Nominatim
-     */
     private fun reverseGeocode(lat: Double, lng: Double) {
         Thread {
-            var name: String? = null
-
-            // 优先高德
-            if (amapKey.isNotEmpty()) {
-                name = reverseGeocodeAmap(lat, lng)
-            }
-
-            // 降级 Nominatim
-            if (name == null) {
-                name = reverseGeocodeNominatim(lat, lng)
-            }
-
+            val name = reverseGeocodeAmap(lat, lng)
             val displayName = name ?: "已选位置"
             runOnUiThread {
                 binding.tvLocationName.text = displayName
@@ -187,38 +164,15 @@ class MainActivity : AppCompatActivity() {
             val url = "https://restapi.amap.com/v3/geocode/regeo" +
                     "?key=$amapKey&location=$lng,$lat&extensions=base&output=json"
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
             val result = conn.inputStream.bufferedReader().readText()
-            // 解析 formatted_address
             val key = "\"formatted_address\":\""
             val idx = result.indexOf(key)
             if (idx >= 0) {
                 val start = idx + key.length
                 val end = result.indexOf("\"", start)
                 if (end > start) result.substring(start, end) else null
-            } else null
-        } catch (_: Exception) { null }
-    }
-
-    private fun reverseGeocodeNominatim(lat: Double, lng: Double): String? {
-        return try {
-            val url = "https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lng&zoom=18&accept-language=zh"
-            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.0")
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
-            val result = conn.inputStream.bufferedReader().readText()
-            val key = "\"display_name\":\""
-            val idx = result.indexOf(key)
-            if (idx >= 0) {
-                val start = idx + key.length
-                var end = start
-                while (end < result.length && result[end] != '"') {
-                    if (result[end] == '\\') end++
-                    end++
-                }
-                result.substring(start, end).replace("\\/", "/")
             } else null
         } catch (_: Exception) { null }
     }
@@ -235,9 +189,6 @@ class MainActivity : AppCompatActivity() {
         binding.fabLayer.setOnClickListener { toggleMapLayer() }
     }
 
-    /**
-     * 设置搜索
-     */
     private fun setupSearch() {
         binding.etSearch.setOnEditorActionListener { _, actionId, _ ->
             if (actionId == EditorInfo.IME_ACTION_SEARCH) {
@@ -253,145 +204,81 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun doSearch(query: String) {
-        Toast.makeText(this, "正在搜索: $query", Toast.LENGTH_SHORT).show()
-        performSearch(query)
-    }
-
-    /**
-     * 搜索地址：优先高德，失败自动降级到 Nominatim
-     */
-    private fun performSearch(query: String) {
+        Toast.makeText(this, "正在搜索: $query ...", Toast.LENGTH_SHORT).show()
         binding.btnSearch.isEnabled = false
         binding.progressSearch.visibility = View.VISIBLE
 
         Thread {
-            var amapFailed = ""
             try {
                 val encodedQuery = URLEncoder.encode(query, "UTF-8")
-                val amapResults = tryAmapSearch(encodedQuery)
-
-                if (amapResults != null && amapResults.isNotEmpty()) {
-                    runOnUiThread {
-                        binding.btnSearch.isEnabled = true
-                        binding.progressSearch.visibility = View.GONE
-                        showSearchResults(amapResults, "高德地图")
-                    }
-                    return@Thread
-                }
-                amapFailed = "高德无结果"
-
-                val nomResults = tryNominatimSearch(query)
+                val result = searchViaAmap(encodedQuery, query)
 
                 runOnUiThread {
                     binding.btnSearch.isEnabled = true
                     binding.progressSearch.visibility = View.GONE
-                    if (nomResults.isNotEmpty()) {
-                        showSearchResults(nomResults, "OpenStreetMap")
+
+                    if (result != null && result.isNotEmpty()) {
+                        showSearchResults(result)
                     } else {
-                        Toast.makeText(this, "未找到结果（${amapFailed}），请检查网络", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this,
+                            "未找到: $query\n请尝试更短的搜索词", Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     binding.btnSearch.isEnabled = true
                     binding.progressSearch.visibility = View.GONE
-                    Toast.makeText(this, "搜索出错，请检查网络", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this,
+                        "搜索出错: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }.start()
     }
 
     /**
-     * 高德 POI 搜索（返回null表示失败）
+     * 高德 POI 搜索
+     * 去掉 citylimit，搜索范围更广
+     * extensions=base 减少数据量
+     * 超时10秒
      */
-    private fun tryAmapSearch(encodedQuery: String): List<SearchResult>? {
-        return try {
+    private fun searchViaAmap(encodedQuery: String, rawQuery: String): List<SearchResult>? {
+        val result = mutableListOf<SearchResult>()
+        try {
             val url = "https://restapi.amap.com/v3/place/text" +
                     "?key=$amapKey&keywords=$encodedQuery" +
-                    "&city=温州&citylimit=true" +
-                    "&children=1&offset=10&page=1&extensions=all&output=json"
+                    "&offset=10&page=1&extensions=base&output=json"
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 5000
-            conn.readTimeout = 5000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.4")
+            conn.connectTimeout = 10000
+            conn.readTimeout = 10000
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.7")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
-                // 高德不可用
+                Log.e("Search", "Amap HTTP $responseCode")
                 return null
             }
 
-            val result = conn.inputStream.bufferedReader().readText()
+            val body = conn.inputStream.bufferedReader().readText()
+            Log.d("Search", "Amap response length: ${body.length}")
 
-            // 检查返回状态
-            if (result.contains("\"status\":\"0\"")) {
+            // Check status
+            if (body.contains("\"status\":\"0\"")) {
+                // Extract infocode for error detail
+                val infoCode = extractJsonStr(body, "\"infocode\":\"") ?: "unknown"
+                Log.e("Search", "Amap status=0, infocode=$infoCode")
                 return null
             }
 
-            parseAmapResults(result)
-        } catch (_: Exception) {
-            null // 网络不通或超时，返回null让调用方降级
-        }
-    }
-
-    /**
-     * Nominatim (OpenStreetMap) POI 搜索 — 免费，无需Key
-     */
-    private fun tryNominatimSearch(query: String): List<SearchResult> {
-        val results = mutableListOf<SearchResult>()
-        return try {
-            val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            // 限定温州区域
-            val url = "https://nominatim.openstreetmap.org/search" +
-                    "?q=$encodedQuery&format=json&limit=10" +
-                    "&bounded=1&viewbox=119.5,28.8,121.5,27.0&accept-language=zh-CN"
-            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.4")
-            val responseCode = conn.responseCode
-
-            if (responseCode != 200) return results
-
-            val result = conn.inputStream.bufferedReader().readText()
-            parseNominatimResults(result)
-        } catch (_: Exception) {
-            results
-        }
-    }
-
-    /**
-     * 解析 Nominatim 搜索结果
-     */
-    private fun parseNominatimResults(json: String): List<SearchResult> {
-        val results = mutableListOf<SearchResult>()
-        try {
-            // 简单解析 JSON 数组 [{...}, {...}]
-            val items = json.split("\"type\":\"").toTypedArray()
-            for (i in 1 until items.size) {
-                val item = items[i]
-                val displayName = extractJsonStr(item, "\"display_name\":\"") ?: continue
-                val lat = extractJsonStr(item, "\"lat\":\"")?.toDoubleOrNull() ?: continue
-                val lon = extractJsonStr(item, "\"lon\":\"")?.toDoubleOrNull() ?: continue
-                // 取名称的第一部分作为简短名称
-                val shortName = displayName.split(",").firstOrNull()?.trim() ?: displayName
-                results.add(SearchResult(shortName, lat, lon))
+            // Parse pois
+            if (!body.contains("\"pois\"")) {
+                Log.e("Search", "Amap response has no pois field")
+                return null
             }
-        } catch (_: Exception) {}
-        return results
-    }
 
-    /**
-     * 解析高德 POI 搜索结果
-     */
-    private fun parseAmapResults(json: String): List<SearchResult> {
-        val results = mutableListOf<SearchResult>()
-        try {
-            // 检查状态
-            if (!json.contains("\"status\":\"1\"")) return results
+            val poisSection = body.substring(body.indexOf("\"pois\":"))
+            val pois = poisSection.split("{\"id\":\"")
+            Log.d("Search", "Found ${pois.size - 1} POIs")
 
-            // 解析每个 poi
-            val pois = json.split("{\"id\":\"")
             for (i in 1 until pois.size) {
                 val poi = pois[i]
                 val name = extractJsonStr(poi, "\"name\":\"") ?: continue
@@ -401,11 +288,20 @@ class MainActivity : AppCompatActivity() {
                     val lng = parts[0].toDoubleOrNull() ?: continue
                     val lat = parts[1].toDoubleOrNull() ?: continue
                     val address = extractJsonStr(poi, "\"address\":\"") ?: ""
-                    results.add(SearchResult("$name $address".trim(), lat, lng))
+                    val city = extractJsonStr(poi, "\"cityname\":\"") ?: ""
+                    val adname = extractJsonStr(poi, "\"adname\":\"") ?: ""
+                    val fullName = if (address.isNotEmpty()) "$name ($adname$address)" else "$name ($city$adname)"
+                    result.add(SearchResult(fullName, lat, lng))
                 }
             }
-        } catch (_: Exception) {}
-        return results
+        } catch (e: java.net.SocketTimeoutException) {
+            Log.e("Search", "Amap timeout")
+            return null
+        } catch (e: Exception) {
+            Log.e("Search", "Amap error: ${e.javaClass.simpleName} ${e.message}")
+            return null
+        }
+        return result
     }
 
     private fun extractJsonStr(json: String, key: String): String? {
@@ -420,13 +316,13 @@ class MainActivity : AppCompatActivity() {
         return json.substring(start, end).replace("\\/", "/").replace("\\\\", "")
     }
 
-    private fun showSearchResults(results: List<SearchResult>, source: String = "高德地图") {
+    private fun showSearchResults(results: List<SearchResult>) {
         val names = results.mapIndexed { i, r ->
             "${i + 1}. ${r.name}"
         }.toTypedArray()
 
         AlertDialog.Builder(this)
-            .setTitle("搜索结果（$source）")
+            .setTitle("搜索结果 (${results.size}条)")
             .setItems(names) { _, which ->
                 val r = results[which]
                 binding.mapView.controller.setCenter(GeoPoint(r.lat, r.lng))
@@ -438,9 +334,6 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    /**
-     * 高德 API Key 设置
-     */
     private fun showAmapKeySetup() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT
@@ -448,35 +341,25 @@ class MainActivity : AppCompatActivity() {
             setText(amapKey)
         }
         AlertDialog.Builder(this)
-            .setTitle("配置高德地图 Key（免费）")
-            .setMessage("搜索功能需要高德「Web服务」API Key，免费注册即可。\n\n" +
-                    "1. 打开 https://lbs.amap.com/ → 控制台\n" +
-                    "2. 应用管理 → 我的应用 → 创建应用\n" +
-                    "3. 为应用添加 Key：\n" +
-                    "   · 服务平台 选「Web服务」(不是Web端JS!)\n" +
-                    "   · 提交\n" +
-                    "4. 复制生成的 Key 粘贴到下方\n\n" +
-                    "⚠️ Key类型必须是「Web服务」，选错会导致搜索无反应！\n\n" +
-                    "不想注册？跳过后可直接在地图上点击选点。")
+            .setTitle("配置高德地图 Key")
+            .setMessage("搜索需要高德 Web服务 API Key。\n\n" +
+                    "1. 打开 https://lbs.amap.com/\n" +
+                    "2. 控制台 - 应用管理 - 创建应用\n" +
+                    "3. 添加 Key，服务平台选 Web服务\n" +
+                    "4. 复制 Key 粘贴到下方")
             .setView(input)
             .setPositiveButton("保存") { _, _ ->
                 val key = input.text.toString().trim()
                 if (key.isNotEmpty()) {
                     amapKey = key
                     prefs.edit().putString("amap_key", key).apply()
-                    Toast.makeText(this, "Key 已保存！现在可以搜索了", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "Key 已保存", Toast.LENGTH_SHORT).show()
                 }
             }
             .setNegativeButton("跳过", null)
-            .setNeutralButton("去注册") { _, _ ->
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.amap.com/dev/key/app")))
-            }
             .show()
     }
 
-    /**
-     * 定位到我的位置
-     */
     private fun goToMyLocation() {
         if (!hasPermissions()) {
             requestPermissions()
@@ -519,9 +402,6 @@ class MainActivity : AppCompatActivity() {
         Toast.makeText(this, "地图: $name", Toast.LENGTH_SHORT).show()
     }
 
-    /**
-     * 开始 GPS 模拟（带WiFi警告）
-     */
     private fun startMocking() {
         val wifiManager = getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
         if (wifiManager.isWifiEnabled) {
@@ -569,18 +449,23 @@ class MainActivity : AppCompatActivity() {
                     showMockErrorDialog(errMsg)
                     stopMocking()
                 } else {
-                    val gpsOk = if (status.gpsRegistered) "Y" else "N"
-                    val netOk = if (status.networkRegistered) "Y" else "N"
-                    Toast.makeText(this, "模拟已启动 GPS:$gpsOk NET:$netOk", Toast.LENGTH_SHORT).show()
+                    val detail = buildProviderDetail(status)
+                    Toast.makeText(this, "模拟已启动 $detail", Toast.LENGTH_LONG).show()
                     showMockTips()
                 }
             }
         }, 1500)
     }
 
-    /**
-     * 显示模拟失败的详细错误对话框
-     */
+    private fun buildProviderDetail(s: MockLocationService.MockStatus): String {
+        val parts = mutableListOf<String>()
+        if (s.gpsRegistered) parts.add("GPS")
+        if (s.networkRegistered) parts.add("NET")
+        if (s.fusedRegistered) parts.add("FUSED")
+        if (s.passiveRegistered) parts.add("PASSIVE")
+        return if (parts.isEmpty()) "无Provider" else parts.joinToString("+")
+    }
+
     private fun showMockErrorDialog(error: String) {
         val msg = when {
             error.contains("SecurityException") || error.contains("未设置模拟位置") ->
@@ -606,8 +491,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v2", false)) return
-        prefs.edit().putBoolean("mock_tips_v2", true).apply()
+        if (prefs.getBoolean("mock_tips_v3", false)) return
+        prefs.edit().putBoolean("mock_tips_v3", true).apply()
         AlertDialog.Builder(this)
             .setTitle("模拟已启动")
             .setMessage(
@@ -616,8 +501,8 @@ class MainActivity : AppCompatActivity() {
                 "   钉钉等APP通过WiFi扫描获取真实位置。\n\n" +
                 "2. 关闭目标APP后重新打开\n" +
                 "   已运行的APP缓存了旧位置。\n\n" +
-                "3. 部分APP可能仍检测到真实位置\n" +
-                "   如钉钉使用阿里自研定位SDK。\n\n" +
+                "3. 确认开发者选项中已选择「宁宁模拟」\n" +
+                "   设置-开发者选项-选择模拟位置信息应用。\n\n" +
                 "4. 保持本APP在后台运行\n" +
                 "   不要从最近任务中划掉。"
             )
@@ -657,11 +542,10 @@ class MainActivity : AppCompatActivity() {
     private fun updateStatus() {
         if (serviceBound && mockService != null) {
             val s = mockService!!.getStatus()
-            val gpsOk = if (s.gpsRegistered) "Y" else "N"
-            val netOk = if (s.networkRegistered) "Y" else "N"
-            binding.tvStatus.text = "推送: ${s.pushCount}次 | GPS:$gpsOk NET:$netOk"
+            val detail = buildProviderDetail(s)
+            binding.tvStatus.text = "推送: ${s.pushCount}次 | $detail"
             if (s.wifiEnabled) {
-                binding.tvWifiStatus.text = "WiFi开启中! 目标APP可能检测到真实位置"
+                binding.tvWifiStatus.text = "WiFi开启! 目标APP可能检测到真实位置"
             } else {
                 binding.tvWifiStatus.text = "WiFi: 已关闭"
             }
@@ -672,7 +556,7 @@ class MainActivity : AppCompatActivity() {
         if (isMocking) {
             binding.btnStartMock.text = "停止模拟"
             binding.btnStartMock.setBackgroundColor(getColor(android.R.color.holo_red_dark))
-            binding.tvStatusBar.text = "模拟中 ●"
+            binding.tvStatusBar.text = "模拟中"
             binding.tvStatusBar.setTextColor(getColor(android.R.color.holo_green_dark))
             binding.cardSelected.visibility = View.VISIBLE
             binding.tvCoords.text = "%.6f, %.6f".format(selectedLat, selectedLng)
@@ -692,100 +576,6 @@ class MainActivity : AppCompatActivity() {
                 startMocking()
             }
         }
-    }
-
-    /**
-     * 验证模拟位置应用是否已正确设置
-     * Android 14+ 兼容：mock_location 可能返回 "0"（未设置）或包名
-     * 某些ROM上返回的是应用UID数字字符串
-     */
-    private fun verifyMockLocationApp(): Boolean {
-        try {
-            val mockApp = Settings.Secure.getString(contentResolver, "mock_location")
-            // 未设置
-            if (mockApp.isNullOrEmpty() || mockApp == "0") {
-                // 二次检查：尝试通过 AppOps 检查（Android 6+）
-                if (checkMockAppOps()) return true
-                showMockLocationGuide()
-                return false
-            }
-            // 直接匹配包名
-            if (mockApp == packageName) return true
-
-            // 某些ROM返回的是应用UID，尝试比较
-            try {
-                val uid = mockApp.toIntOrNull()
-                if (uid != null) {
-                    val appUid = packageManager.getApplicationInfo(packageName, 0).uid
-                    if (uid == appUid) return true
-                }
-            } catch (_: Exception) {}
-
-            // 不匹配 → 弹窗提示，但只提示一次后不再弹窗（让用户手动选）
-            if (!prefs.getBoolean("mock_guide_shown", false)) {
-                prefs.edit().putBoolean("mock_guide_shown", true).apply()
-                AlertDialog.Builder(this)
-                    .setTitle("模拟位置应用不匹配")
-                    .setMessage("检测到模拟位置应用设置为：$mockApp\n本应用包名：$packageName\n\n请确认在开发者选项中选择的是「宁宁模拟」。\n如果已正确选择，请直接点击「我已确认」继续。")
-                    .setPositiveButton("去开发者选项") { _, _ ->
-                        startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-                    }
-                    .setNeutralButton("我已确认，继续") { _, _ ->
-                        // 用户确认已设置好，跳过检查直接进入
-                    }
-                    .setNegativeButton("取消", null)
-                    .show()
-                return false
-            }
-
-            // 用户已看过提示，允许继续尝试
-            return true
-        } catch (_: Exception) {
-            return true // 无法读取，继续尝试
-        }
-    }
-
-    /**
-     * 通过 AppOpsManager 检查是否有 MOCK_LOCATION 权限（更可靠）
-     */
-    private fun checkMockAppOps(): Boolean {
-        return try {
-            val appOps = getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
-            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                appOps.unsafeCheckOpNoThrow(
-                    "android:mock_location",
-                    android.os.Process.myUid(),
-                    packageName
-                )
-            } else {
-                @Suppress("DEPRECATION")
-                appOps.checkOp(
-                    "android:mock_location",
-                    android.os.Process.myUid(),
-                    packageName
-                )
-            }
-            result == android.app.AppOpsManager.MODE_ALLOWED
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    private fun showMockLocationGuide() {
-        AlertDialog.Builder(this)
-            .setTitle("需要开启模拟位置")
-            .setMessage("请按以下步骤操作：\n\n" +
-                    "1. 打开 设置\n" +
-                    "2. 进入 开发者选项\n" +
-                    "   （如果没有，前往 关于手机 → 连续点击「版本号」7次）\n" +
-                    "3. 找到「选择模拟位置信息应用」\n" +
-                    "4. 选择「宁宁模拟」\n\n" +
-                    "设置完成后才能开始模拟定位。")
-            .setPositiveButton("去开发者选项") { _, _ ->
-                startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-            }
-            .setNegativeButton("稍后", null)
-            .show()
     }
 
     private fun hasPermissions(): Boolean {
