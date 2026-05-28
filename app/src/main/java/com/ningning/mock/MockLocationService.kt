@@ -112,8 +112,31 @@ class MockLocationService : Service() {
 
     /**
      * 检查是否设置了正确的模拟位置应用
+     * 兼容 Android 14+ ：Settings.Secure.mock_location 可能返回 "0" 或其他值
+     * 优先通过 AppOpsManager 检查
      */
     private fun checkMockPermission(): Boolean {
+        // 方式1: AppOpsManager 检查（最可靠）
+        try {
+            val appOps = getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                appOps.unsafeCheckOpNoThrow(
+                    "android:mock_location",
+                    android.os.Process.myUid(),
+                    packageName
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                appOps.checkOp(
+                    "android:mock_location",
+                    android.os.Process.myUid(),
+                    packageName
+                )
+            }
+            if (result == android.app.AppOpsManager.MODE_ALLOWED) return true
+        } catch (_: Exception) {}
+
+        // 方式2: Settings.Secure 回退检查
         return try {
             val mockApp = Settings.Secure.getString(contentResolver, "mock_location")
             mockApp == packageName

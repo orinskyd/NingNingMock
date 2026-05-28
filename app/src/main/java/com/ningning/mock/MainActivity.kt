@@ -255,6 +255,8 @@ class MainActivity : AppCompatActivity() {
             showAmapKeySetup()
             return
         }
+        // 先提示用户搜索已触发
+        Toast.makeText(this, "正在搜索: $query", Toast.LENGTH_SHORT).show()
         performAmapSearch(query)
     }
 
@@ -269,19 +271,48 @@ class MainActivity : AppCompatActivity() {
             try {
                 val encodedQuery = URLEncoder.encode(query, "UTF-8")
                 // 高德 POI 搜索 API
+                // city 用城市名或adcode都可以，citylimit=true 限定在该城市范围内
+                // children=1 也搜索子POI（如商场内的店铺）
                 val url = "https://restapi.amap.com/v3/place/text" +
-                        "?key=$amapKey&keywords=$encodedQuery&city=温州&citylimit=false" +
-                        "&offset=10&page=1&extensions=base&output=json"
+                        "?key=$amapKey&keywords=$encodedQuery" +
+                        "&city=温州&citylimit=true" +
+                        "&children=1&offset=10&page=1&extensions=all&output=json"
                 val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
                 conn.connectTimeout = 8000
                 conn.readTimeout = 8000
-                val result = conn.inputStream.bufferedReader().readText()
-
-                val results = parseAmapResults(result)
+                conn.setRequestProperty("User-Agent", "NingNingMock/1.2")
+                val responseCode = conn.responseCode
+                val result = if (responseCode == 200) {
+                    conn.inputStream.bufferedReader().readText()
+                } else {
+                    conn.errorStream?.bufferedReader()?.readText() ?: "{\"status\":\"0\",\"info\":\"HTTP $responseCode\"}"
+                }
 
                 runOnUiThread {
                     binding.btnSearch.isEnabled = true
                     binding.progressSearch.visibility = View.GONE
+                }
+
+                // 检查 key 是否有效
+                if (result.contains("\"status\":\"0\"")) {
+                    val info = extractJsonStr(result, "\"info\":\"") ?: "未知"
+                    runOnUiThread {
+                        if (info.contains("INVALID_USER_KEY") || info.contains("无效") || info.contains("INVALID")) {
+                            Toast.makeText(this, "高德Key无效，请检查Key类型（需要「Web服务」类型）", Toast.LENGTH_LONG).show()
+                            // 清除无效key
+                            amapKey = ""
+                            prefs.edit().remove("amap_key").apply()
+                            showAmapKeySetup()
+                        } else {
+                            Toast.makeText(this, "搜索无结果（$info）", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    return@Thread
+                }
+
+                val results = parseAmapResults(result)
+
+                runOnUiThread {
                     if (results.isNotEmpty()) {
                         showSearchResults(results)
                     } else {
@@ -366,18 +397,20 @@ class MainActivity : AppCompatActivity() {
     private fun showAmapKeySetup() {
         val input = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_TEXT
-            hint = "粘贴你的高德 Web API Key"
+            hint = "粘贴你的高德 Web服务 Key"
             setText(amapKey)
         }
         AlertDialog.Builder(this)
             .setTitle("配置高德地图 Key（免费）")
-            .setMessage("搜索功能需要高德地图 API Key，免费注册即可。\n\n" +
-                    "1. 打开浏览器访问 https://lbs.amap.com/\n" +
-                    "2. 注册/登录 → 控制台 → 应用管理 → 创建应用\n" +
-                    "3. 添加 Key，服务平台选择「Web服务」\n" +
-                    "4. 复制 Key 粘贴到下方\n\n" +
-                    "注册只需 2 分钟，完全免费！\n" +
-                    "不想注册？可以跳过，直接在地图上点击选点。")
+            .setMessage("搜索功能需要高德「Web服务」API Key，免费注册即可。\n\n" +
+                    "1. 打开 https://lbs.amap.com/ → 控制台\n" +
+                    "2. 应用管理 → 我的应用 → 创建应用\n" +
+                    "3. 为应用添加 Key：\n" +
+                    "   · 服务平台 选「Web服务」(不是Web端JS!)\n" +
+                    "   · 提交\n" +
+                    "4. 复制生成的 Key 粘贴到下方\n\n" +
+                    "⚠️ Key类型必须是「Web服务」，选错会导致搜索无反应！\n\n" +
+                    "不想注册？跳过后可直接在地图上点击选点。")
             .setView(input)
             .setPositiveButton("保存") { _, _ ->
                 val key = input.text.toString().trim()
@@ -389,7 +422,7 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("跳过", null)
             .setNeutralButton("去注册") { _, _ ->
-                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://lbs.amap.com/")))
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://console.amap.com/dev/key/app")))
             }
             .show()
     }
@@ -537,29 +570,78 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 验证模拟位置应用是否已正确设置
+     * Android 14+ 兼容：mock_location 可能返回 "0"（未设置）或包名
+     * 某些ROM上返回的是应用UID数字字符串
      */
     private fun verifyMockLocationApp(): Boolean {
         try {
             val mockApp = Settings.Secure.getString(contentResolver, "mock_location")
+            // 未设置
             if (mockApp.isNullOrEmpty() || mockApp == "0") {
+                // 二次检查：尝试通过 AppOps 检查（Android 6+）
+                if (checkMockAppOps()) return true
                 showMockLocationGuide()
                 return false
             }
-            if (mockApp != packageName) {
+            // 直接匹配包名
+            if (mockApp == packageName) return true
+
+            // 某些ROM返回的是应用UID，尝试比较
+            try {
+                val uid = mockApp.toIntOrNull()
+                if (uid != null) {
+                    val appUid = packageManager.getApplicationInfo(packageName, 0).uid
+                    if (uid == appUid) return true
+                }
+            } catch (_: Exception) {}
+
+            // 不匹配 → 弹窗提示，但只提示一次后不再弹窗（让用户手动选）
+            if (!prefs.getBoolean("mock_guide_shown", false)) {
+                prefs.edit().putBoolean("mock_guide_shown", true).apply()
                 AlertDialog.Builder(this)
-                    .setTitle("模拟位置应用不正确")
-                    .setMessage("当前设置的模拟位置应用不是「宁宁模拟」。\n\n当前设置：$mockApp\n\n请在开发者选项中更改为「宁宁模拟」。")
-                    .setPositiveButton("去设置") { _, _ ->
+                    .setTitle("模拟位置应用不匹配")
+                    .setMessage("检测到模拟位置应用设置为：$mockApp\n本应用包名：$packageName\n\n请确认在开发者选项中选择的是「宁宁模拟」。\n如果已正确选择，请直接点击「我已确认」继续。")
+                    .setPositiveButton("去开发者选项") { _, _ ->
                         startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                    }
+                    .setNeutralButton("我已确认，继续") { _, _ ->
+                        // 用户确认已设置好，跳过检查直接进入
                     }
                     .setNegativeButton("取消", null)
                     .show()
                 return false
             }
-            // 正确设置
+
+            // 用户已看过提示，允许继续尝试
             return true
         } catch (_: Exception) {
             return true // 无法读取，继续尝试
+        }
+    }
+
+    /**
+     * 通过 AppOpsManager 检查是否有 MOCK_LOCATION 权限（更可靠）
+     */
+    private fun checkMockAppOps(): Boolean {
+        return try {
+            val appOps = getSystemService(Context.APP_OPS_SERVICE) as android.app.AppOpsManager
+            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                appOps.unsafeCheckOpNoThrow(
+                    "android:mock_location",
+                    android.os.Process.myUid(),
+                    packageName
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                appOps.checkOp(
+                    "android:mock_location",
+                    android.os.Process.myUid(),
+                    packageName
+                )
+            }
+            result == android.app.AppOpsManager.MODE_ALLOWED
+        } catch (_: Exception) {
+            false
         }
     }
 
