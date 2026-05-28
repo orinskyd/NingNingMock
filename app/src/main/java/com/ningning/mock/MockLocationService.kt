@@ -80,21 +80,16 @@ class MockLocationService : Service() {
     private fun startMocking(): Boolean {
         if (isRunning) return true
 
-        // 验证模拟位置权限
-        if (!checkMockPermission()) {
-            lastError = "未设置模拟位置应用"
-            return false
-        }
-
         // WiFi控制
         wifiController.disableForMock()
 
-        // 注册Provider
+        // 直接尝试注册Provider，不提前检查权限
+        // 如果权限不对，registerProvider会抛SecurityException，我们捕获后报错
         val gpsOk = registerProvider(GPS_PROVIDER)
         val netOk = registerProvider(NETWORK_PROVIDER)
 
         if (!gpsOk && !netOk) {
-            lastError = "Provider注册失败：请在开发者选项中将「宁宁模拟」设为模拟位置应用"
+            lastError = lastError ?: "Provider注册失败，请确认已在开发者选项中将「宁宁模拟」设为模拟位置应用"
             wifiController.restoreWifiState()
             return false
         }

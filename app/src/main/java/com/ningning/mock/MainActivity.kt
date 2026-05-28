@@ -254,64 +254,39 @@ class MainActivity : AppCompatActivity() {
 
     private fun doSearch(query: String) {
         Toast.makeText(this, "正在搜索: $query", Toast.LENGTH_SHORT).show()
-        performAmapSearch(query)
+        performSearch(query)
     }
 
     /**
-     * 高德地图 POI 搜索
+     * 搜索地址：优先高德，失败自动降级到 Nominatim
      */
-    private fun performAmapSearch(query: String) {
+    private fun performSearch(query: String) {
         binding.btnSearch.isEnabled = false
         binding.progressSearch.visibility = View.VISIBLE
 
         Thread {
             try {
+                // 1. 先试高德
                 val encodedQuery = URLEncoder.encode(query, "UTF-8")
-                // 高德 POI 搜索 API
-                // city 用城市名或adcode都可以，citylimit=true 限定在该城市范围内
-                // children=1 也搜索子POI（如商场内的店铺）
-                val url = "https://restapi.amap.com/v3/place/text" +
-                        "?key=$amapKey&keywords=$encodedQuery" +
-                        "&city=温州&citylimit=true" +
-                        "&children=1&offset=10&page=1&extensions=all&output=json"
-                val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 8000
-                conn.readTimeout = 8000
-                conn.setRequestProperty("User-Agent", "NingNingMock/1.2")
-                val responseCode = conn.responseCode
-                val result = if (responseCode == 200) {
-                    conn.inputStream.bufferedReader().readText()
-                } else {
-                    conn.errorStream?.bufferedReader()?.readText() ?: "{\"status\":\"0\",\"info\":\"HTTP $responseCode\"}"
-                }
+                val amapResults = tryAmapSearch(encodedQuery)
 
-                runOnUiThread {
-                    binding.btnSearch.isEnabled = true
-                    binding.progressSearch.visibility = View.GONE
-                }
-
-                // 检查 key 是否有效
-                if (result.contains("\"status\":\"0\"")) {
-                    val info = extractJsonStr(result, "\"info\":\"") ?: "未知"
+                if (amapResults != null && amapResults.isNotEmpty()) {
                     runOnUiThread {
-                        if (info.contains("INVALID_USER_KEY") || info.contains("无效") || info.contains("INVALID")) {
-                            Toast.makeText(this, "高德Key无效，请检查Key类型（需要「Web服务」类型）", Toast.LENGTH_LONG).show()
-                            // 清除无效key
-                            amapKey = ""
-                            prefs.edit().remove("amap_key").apply()
-                            showAmapKeySetup()
-                        } else {
-                            Toast.makeText(this, "搜索无结果（$info）", Toast.LENGTH_SHORT).show()
-                        }
+                        binding.btnSearch.isEnabled = true
+                        binding.progressSearch.visibility = View.GONE
+                        showSearchResults(amapResults, "高德地图")
                     }
                     return@Thread
                 }
 
-                val results = parseAmapResults(result)
+                // 2. 高德没结果或失败，降级到 Nominatim
+                val nomResults = tryNominatimSearch(query)
 
                 runOnUiThread {
-                    if (results.isNotEmpty()) {
-                        showSearchResults(results)
+                    binding.btnSearch.isEnabled = true
+                    binding.progressSearch.visibility = View.GONE
+                    if (nomResults.isNotEmpty()) {
+                        showSearchResults(nomResults, "OpenStreetMap")
                     } else {
                         Toast.makeText(this, "未找到结果，请尝试更具体的关键词", Toast.LENGTH_SHORT).show()
                     }
@@ -321,14 +296,90 @@ class MainActivity : AppCompatActivity() {
                     binding.btnSearch.isEnabled = true
                     binding.progressSearch.visibility = View.GONE
                     val msg = e.message ?: "未知错误"
-                    if (msg.contains("Unable to resolve host") || msg.contains("connect")) {
-                        Toast.makeText(this, "网络连接失败，请检查网络", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(this, "搜索失败: $msg", Toast.LENGTH_SHORT).show()
-                    }
+                    Toast.makeText(this, "搜索出错: $msg", Toast.LENGTH_SHORT).show()
                 }
             }
         }.start()
+    }
+
+    /**
+     * 高德 POI 搜索（返回null表示失败）
+     */
+    private fun tryAmapSearch(encodedQuery: String): List<SearchResult>? {
+        return try {
+            val url = "https://restapi.amap.com/v3/place/text" +
+                    "?key=$amapKey&keywords=$encodedQuery" +
+                    "&city=温州&citylimit=true" +
+                    "&children=1&offset=10&page=1&extensions=all&output=json"
+            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 5000
+            conn.readTimeout = 5000
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.4")
+            val responseCode = conn.responseCode
+
+            if (responseCode != 200) {
+                // 高德不可用
+                return null
+            }
+
+            val result = conn.inputStream.bufferedReader().readText()
+
+            // 检查返回状态
+            if (result.contains("\"status\":\"0\"")) {
+                return null
+            }
+
+            parseAmapResults(result)
+        } catch (_: Exception) {
+            null // 网络不通或超时，返回null让调用方降级
+        }
+    }
+
+    /**
+     * Nominatim (OpenStreetMap) POI 搜索 — 免费，无需Key
+     */
+    private fun tryNominatimSearch(query: String): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        return try {
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            // 限定温州区域：纬度27.0~28.5，经度120.0~121.5
+            val url = "https://nominatim.openstreetmap.org/search" +
+                    "?q=$encodedQuery&format=json&limit=10" +
+                    "&bounded=1&viewbox=119.8,28.5,121.2,27.0&accept-language=zh-CN"
+            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.4")
+            val responseCode = conn.responseCode
+
+            if (responseCode != 200) return results
+
+            val result = conn.inputStream.bufferedReader().readText()
+            parseNominatimResults(result)
+        } catch (_: Exception) {
+            results
+        }
+    }
+
+    /**
+     * 解析 Nominatim 搜索结果
+     */
+    private fun parseNominatimResults(json: String): List<SearchResult> {
+        val results = mutableListOf<SearchResult>()
+        try {
+            // 简单解析 JSON 数组 [{...}, {...}]
+            val items = json.split("\"type\":\"").toTypedArray()
+            for (i in 1 until items.size) {
+                val item = items[i]
+                val displayName = extractJsonStr(item, "\"display_name\":\"") ?: continue
+                val lat = extractJsonStr(item, "\"lat\":\"")?.toDoubleOrNull() ?: continue
+                val lon = extractJsonStr(item, "\"lon\":\"")?.toDoubleOrNull() ?: continue
+                // 取名称的第一部分作为简短名称
+                val shortName = displayName.split(",").firstOrNull()?.trim() ?: displayName
+                results.add(SearchResult(shortName, lat, lon))
+            }
+        } catch (_: Exception) {}
+        return results
     }
 
     /**
@@ -370,13 +421,13 @@ class MainActivity : AppCompatActivity() {
         return json.substring(start, end).replace("\\/", "/").replace("\\\\", "")
     }
 
-    private fun showSearchResults(results: List<SearchResult>) {
+    private fun showSearchResults(results: List<SearchResult>, source: String = "高德地图") {
         val names = results.mapIndexed { i, r ->
             "${i + 1}. ${r.name}"
         }.toTypedArray()
 
         AlertDialog.Builder(this)
-            .setTitle("搜索结果（高德地图）")
+            .setTitle("搜索结果（$source）")
             .setItems(names) { _, which ->
                 val r = results[which]
                 binding.mapView.controller.setCenter(GeoPoint(r.lat, r.lng))
@@ -471,13 +522,10 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * 开始 GPS 模拟
+     * 不做前置检查，直接启动Service尝试注册Provider
+     * 如果Provider注册失败，由Service返回错误信息，再弹窗提示用户
      */
     private fun startMocking() {
-        // 强制检查模拟位置设置
-        if (!verifyMockLocationApp()) {
-            return
-        }
-
         val intent = Intent(this, MockLocationService::class.java).apply {
             putExtra(MockLocationService.EXTRA_LAT, selectedLat)
             putExtra(MockLocationService.EXTRA_LNG, selectedLng)
@@ -489,17 +537,54 @@ class MainActivity : AppCompatActivity() {
         updateUIState()
         startStatusUpdates()
 
-        // 延迟检查是否成功
+        // 延迟1.5秒检查Service是否真正启动成功
         handler.postDelayed({
-            if (isMocking && serviceBound) {
-                val status = mockService?.getStatus()
-                if (status != null && !status.gpsRegistered && !status.networkRegistered) {
-                    Toast.makeText(this,
-                        "警告：Mock Provider 注册失败！\n请确保在开发者选项中已将「宁宁模拟」设为模拟位置应用",
-                        Toast.LENGTH_LONG).show()
+            if (!serviceBound) {
+                // Service都没绑上
+                showMockErrorDialog("服务启动失败，请尝试重新打开APP")
+                stopMocking()
+                return@postDelayed
+            }
+            val status = mockService?.getStatus()
+            if (status != null) {
+                if (!status.gpsRegistered && !status.networkRegistered) {
+                    // Provider注册失败
+                    val errMsg = status.error ?: "未知错误"
+                    showMockErrorDialog(errMsg)
+                    stopMocking()
+                } else {
+                    // 至少一个Provider成功了
+                    Toast.makeText(this, "模拟已启动！GPS:${if(status.gpsRegistered) "✓" else "✗"} NET:${if(status.networkRegistered) "✓" else "✗"}", Toast.LENGTH_SHORT).show()
                 }
             }
-        }, 2000)
+        }, 1500)
+    }
+
+    /**
+     * 显示模拟失败的详细错误对话框
+     */
+    private fun showMockErrorDialog(error: String) {
+        val msg = when {
+            error.contains("SecurityException") || error.contains("未设置模拟位置") ->
+                "模拟位置权限未授予。\n\n请按以下步骤操作：\n" +
+                "1. 打开 设置 → 系统 → 开发者选项\n" +
+                "   （如果没有开发者选项：设置 → 关于手机 → 连续点击「版本号」7次）\n" +
+                "2. 找到「选择模拟位置信息应用」\n" +
+                "3. 选择「宁宁模拟」\n" +
+                "4. 返回本APP，重新点击「开始模拟」"
+            error.contains("Provider注册异常") ->
+                "Provider注册出错：\n$error\n\n建议重启手机后再试。"
+            else -> "启动失败：$error"
+        }
+        AlertDialog.Builder(this)
+            .setTitle("模拟定位启动失败")
+            .setMessage(msg)
+            .setPositiveButton("去开发者选项") { _, _ ->
+                startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+            }
+            .setNegativeButton("知道了", null)
+            .setCancelable(false)
+            .show()
     }
 
     private fun stopMocking() {
