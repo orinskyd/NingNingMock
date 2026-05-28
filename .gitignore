@@ -9,3 +9,7 @@
 .cxx
 local.properties
 /app/build
+*.apk
+*.zip
+/artifact_out/
+/gen_icons.py
