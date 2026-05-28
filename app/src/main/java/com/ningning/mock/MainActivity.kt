@@ -9,7 +9,6 @@ import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.location.LocationManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -30,6 +29,7 @@ import com.ningning.mock.databinding.ActivityMainBinding
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
@@ -62,6 +62,13 @@ class MainActivity : AppCompatActivity() {
     )
     private val PERMISSION_REQUEST = 1001
 
+    // 瓦片图层列表：中国可用优先
+    private val tileLayers = arrayOf(
+        "CartoDB" to createCartoDBTileSource(),
+        "OpenStreetMap" to TileSourceFactory.MAPNIK
+    )
+    private var currentLayerIndex = 0
+
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
             val binder = service as MockLocationService.LocalBinder
@@ -81,7 +88,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = packageName
+            userAgentValue = "NingNingMock/1.9"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -96,7 +103,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMap() {
         binding.mapView.apply {
-            setTileSource(TileSourceFactory.MAPNIK)
+            setTileSource(tileLayers[0].second)
             setMultiTouchControls(true)
             controller.setZoom(14.0)
             controller.setCenter(GeoPoint(28.0, 120.67))
@@ -153,9 +160,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun reverseGeocode(lat: Double, lng: Double) {
         Thread {
-            // 先用 Geocoder
             var name = reverseGeocodeSystem(lat, lng)
-            // 如果 Geocoder 失败，用高德
             if (name == null) {
                 name = reverseGeocodeAmap(lat, lng)
             }
@@ -166,11 +171,6 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /**
-     * Android 系统内置 Geocoder 反向地理编码
-     * 优点：不需要 API key，不需要网络（部分手机离线可用）
-     * 阻塞式 getFromLocation，所有版本都支持
-     */
     @Suppress("DEPRECATION")
     private fun reverseGeocodeSystem(lat: Double, lng: Double): String? {
         return try {
@@ -234,14 +234,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 搜索流程：
-     * 1. Android Geocoder（系统内置，不需要API key）
-     * 2. 高德 POI 搜索（需要网络和有效key）
-     * 3. 高德 Geocoding API（备用）
-     *
-     * 每一步都有详细错误提示
-     */
     private fun doSearch(query: String) {
         Toast.makeText(this, "正在搜索: $query ...", Toast.LENGTH_SHORT).show()
         binding.btnSearch.isEnabled = false
@@ -310,16 +302,10 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
-    /**
-     * 方法1: Android 系统内置 Geocoder
-     * 优点：不需要 API key，在中国手机上通常使用高德/百度后端
-     * 全部使用阻塞式 API（支持所有版本），在线程中调用没问题
-     */
     @Suppress("DEPRECATION")
     private fun searchViaGeocoder(query: String): List<SearchResult>? {
         return try {
             val geocoder = Geocoder(this, Locale.CHINA)
-            // 阻塞式 getFromLocationName，所有 Android 版本都支持
             val addresses = geocoder.getFromLocationName(query, 10) ?: emptyList()
             if (addresses.isEmpty()) {
                 Log.d("Search", "Geocoder returned 0 addresses")
@@ -353,9 +339,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 方法2: 高德 POI 搜索
-     */
     private fun searchViaAmap(encodedQuery: String): List<SearchResult>? {
         val result = mutableListOf<SearchResult>()
         try {
@@ -365,7 +348,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.8")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.9")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -416,9 +399,6 @@ class MainActivity : AppCompatActivity() {
         return if (result.isEmpty()) null else result
     }
 
-    /**
-     * 方法3: 高德地理编码（把地址转坐标，和POI搜索不同）
-     */
     private fun searchViaAmapGeocode(encodedQuery: String): List<SearchResult>? {
         return try {
             val url = "https://restapi.amap.com/v3/geocode/geo" +
@@ -426,7 +406,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.8")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.9")
             val body = conn.inputStream.bufferedReader().readText()
             Log.d("Search", "Amap geocode response: ${body.length} chars")
 
@@ -483,10 +463,38 @@ class MainActivity : AppCompatActivity() {
             .setTitle("搜索结果 (${results.size}条)")
             .setItems(names) { _, which ->
                 val r = results[which]
-                binding.mapView.controller.setCenter(GeoPoint(r.lat, r.lng))
+                val targetPoint = GeoPoint(r.lat, r.lng)
+
+                // 先跳转地图中心到目标位置
+                binding.mapView.controller.animateTo(targetPoint)
                 binding.mapView.controller.setZoom(17.0)
-                onMapClick(GeoPoint(r.lat, r.lng))
+
+                // 清除搜索标记
+                searchMarker?.let { binding.mapView.overlays.remove(it) }
+
+                // 放置搜索结果标记
+                searchMarker = Marker(binding.mapView).apply {
+                    position = targetPoint
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    title = r.name
+                    snippet = "%.5f, %.5f".format(r.lat, r.lng)
+                    setOnMarkerClickListener { marker, _ ->
+                        marker.showInfoWindow()
+                        true
+                    }
+                }
+                binding.mapView.overlays.add(searchMarker)
+
+                // 同时更新选点
+                selectedLat = r.lat
+                selectedLng = r.lng
+                updateSelectedUI(r.lat, r.lng)
+
+                // 强制刷新地图
+                binding.mapView.invalidate()
+
                 binding.etSearch.setText("")
+                Toast.makeText(this, "已定位: ${r.name}", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("取消", null)
             .show()
@@ -529,7 +537,7 @@ class MainActivity : AppCompatActivity() {
                 ?: locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
             if (location != null) {
                 val point = GeoPoint(location.latitude, location.longitude)
-                binding.mapView.controller.setCenter(point)
+                binding.mapView.controller.animateTo(point)
                 binding.mapView.controller.setZoom(17.0)
                 searchMarker?.let { binding.mapView.overlays.remove(it) }
                 searchMarker = Marker(binding.mapView).apply {
@@ -549,28 +557,65 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private var currentLayer = 0
-    private val layers = arrayOf("标准" to TileSourceFactory.MAPNIK)
-
     private fun toggleMapLayer() {
-        currentLayer = (currentLayer + 1) % layers.size
-        val (name, source) = layers[currentLayer]
+        currentLayerIndex = (currentLayerIndex + 1) % tileLayers.size
+        val (name, source) = tileLayers[currentLayerIndex]
         binding.mapView.setTileSource(source)
         binding.mapView.invalidate()
         Toast.makeText(this, "地图: $name", Toast.LENGTH_SHORT).show()
     }
 
-    private fun startMocking() {
-        // 检查开发者选项中的模拟位置应用
-        val mockApp = try {
-            Settings.Secure.getString(contentResolver, "mock_location") ?: ""
-        } catch (_: Exception) { "" }
+    /**
+     * v1.9 修复：用实际注册 test provider 来检测模拟位置权限
+     * 比读取 Settings.Secure 更可靠（部分手机返回值格式不标准）
+     */
+    private fun isMockLocationAllowed(): Boolean {
+        return try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val provider = LocationManager.GPS_PROVIDER
+            // 先清理可能存在的旧 provider
+            try { lm.removeTestProvider(provider) } catch (_: Exception) {}
 
-        if (mockApp.isEmpty() || !mockApp.contains(packageName)) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val builderClass = Class.forName("android.location.provider.ProviderProperties\$Builder")
+                val builder = builderClass.getConstructor().newInstance()
+                builderClass.getMethod("setHasAltitudeSupport", Boolean::class.java).invoke(builder, true)
+                builderClass.getMethod("setHasSpeedSupport", Boolean::class.java).invoke(builder, true)
+                builderClass.getMethod("setHasBearingSupport", Boolean::class.java).invoke(builder, true)
+                builderClass.getMethod("setPowerUsage", Int::class.java).invoke(builder, 1)
+                builderClass.getMethod("setAccuracy", Int::class.java).invoke(builder, 1)
+                val props = builderClass.getMethod("build").invoke(builder)
+                val method = LocationManager::class.java.getMethod("addTestProvider",
+                    String::class.java, props.javaClass)
+                method.invoke(lm, provider, props)
+            } else {
+                @Suppress("DEPRECATION")
+                lm.addTestProvider(provider,
+                    false, true, false, false, true, true, true,
+                    android.location.Criteria.POWER_MEDIUM, android.location.Criteria.ACCURACY_FINE)
+            }
+
+            // 注册成功后清理
+            try { lm.removeTestProvider(provider) } catch (_: Exception) {}
+            Log.d("MockCheck", "isMockLocationAllowed: true")
+            true
+        } catch (e: SecurityException) {
+            Log.d("MockCheck", "isMockLocationAllowed: false (SecurityException)")
+            false
+        } catch (e: Exception) {
+            Log.d("MockCheck", "isMockLocationAllowed error: ${e.javaClass.simpleName}: ${e.message}")
+            // 非 SecurityException 的错误不阻止（可能是其他原因）
+            true
+        }
+    }
+
+    private fun startMocking() {
+        // v1.9: 用实际注册 test provider 检测，替代 Settings.Secure 读取
+        if (!isMockLocationAllowed()) {
             AlertDialog.Builder(this)
                 .setTitle("请先设置模拟位置应用")
                 .setMessage(
-                    "当前未设置模拟位置应用。\n\n" +
+                    "模拟位置权限未授予。\n\n" +
                     "请按以下步骤操作：\n\n" +
                     "1. 打开「设置」\n" +
                     "2. 找到「开发者选项」\n" +
@@ -631,7 +676,6 @@ class MainActivity : AppCompatActivity() {
             }
             val status = mockService?.getStatus()
             if (status != null) {
-                // 检查 Provider 注册情况
                 val registered = mutableListOf<String>()
                 if (status.gpsRegistered) registered.add("GPS")
                 if (status.networkRegistered) registered.add("NET")
@@ -641,18 +685,15 @@ class MainActivity : AppCompatActivity() {
                 val errorMsg = status.error
 
                 if (registered.isEmpty()) {
-                    // 全部注册失败
                     val msg = errorMsg ?: "Provider注册失败"
                     Log.e("MockCheck", "All providers failed: $msg")
                     showMockErrorDialog(msg)
                     stopMocking()
                 } else {
-                    // 至少有一个成功，验证模拟是否生效
                     val mockApp = status.mockLocationApp
                     val detail = registered.joinToString("+")
                     Log.d("MockCheck", "Providers OK: $detail, mockApp=$mockApp")
 
-                    // 尝试读取 mock provider 的位置来验证
                     var verifyOk = false
                     try {
                         val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -722,8 +763,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v4", false)) return
-        prefs.edit().putBoolean("mock_tips_v4", true).apply()
+        if (prefs.getBoolean("mock_tips_v5", false)) return
+        prefs.edit().putBoolean("mock_tips_v5", true).apply()
         AlertDialog.Builder(this)
             .setTitle("模拟已启动")
             .setMessage(
@@ -732,11 +773,9 @@ class MainActivity : AppCompatActivity() {
                 "   钉钉等APP通过WiFi扫描获取真实位置。\n\n" +
                 "2. 关闭目标APP后重新打开\n" +
                 "   已运行的APP缓存了旧位置。\n\n" +
-                "3. 确认开发者选项中已选择「宁宁模拟」\n" +
-                "   设置-开发者选项-选择模拟位置信息应用。\n\n" +
-                "4. 保持本APP在后台运行\n" +
+                "3. 保持本APP在后台运行\n" +
                 "   不要从最近任务中划掉。\n\n" +
-                "5. 打开目标APP后等待几秒\n" +
+                "4. 打开目标APP后等待几秒\n" +
                 "   新位置需要时间传播。"
             )
             .setPositiveButton("我知道了", null)
@@ -856,4 +895,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     data class SearchResult(val name: String, val lat: Double, val lng: Double)
+
+    companion object {
+        /**
+         * 创建 CartoDB 瓦片源（中国可用，WGS-84 坐标系）
+         * 比 OpenStreetMap 官方瓦片在国内加载更快更稳定
+         */
+        private fun createCartoDBTileSource(): XYTileSource {
+            return XYTileSource(
+                "CartoDBVoyager",
+                0, 19,
+                256, ".png",
+                arrayOf(
+                    "https://a.basemaps.cartocdn.com/rastertiles/voyager",
+                    "https://b.basemaps.cartocdn.com/rastertiles/voyager",
+                    "https://c.basemaps.cartocdn.com/rastertiles/voyager"
+                )
+            )
+        }
+    }
 }
