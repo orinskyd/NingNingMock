@@ -41,8 +41,9 @@ class MainActivity : AppCompatActivity() {
     private var serviceBound = false
     private var isMocking = false
 
-    // 高德API Key（需在 https://lbs.amap.com/ 免费注册获取）
-    private var amapKey = ""
+    // 高德API Key（已内置，用户也可自行更换）
+    private val DEFAULT_AMAP_KEY = "77307996c1d945194fdafea3c683ce5d"
+    private var amapKey = DEFAULT_AMAP_KEY
 
     // 地图相关
     private var currentMarker: Marker? = null
@@ -76,7 +77,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
 
         prefs = getSharedPreferences("ningning_prefs", Context.MODE_PRIVATE)
-        amapKey = prefs.getString("amap_key", "") ?: ""
+        amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         // 初始化 osmdroid
         Configuration.getInstance().apply {
@@ -251,11 +252,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun doSearch(query: String) {
-        if (amapKey.isEmpty()) {
-            showAmapKeySetup()
-            return
-        }
-        // 先提示用户搜索已触发
         Toast.makeText(this, "正在搜索: $query", Toast.LENGTH_SHORT).show()
         performAmapSearch(query)
     }
