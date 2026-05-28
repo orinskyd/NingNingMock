@@ -17,24 +17,21 @@ class MockLocationService : Service() {
     private lateinit var locationManager: LocationManager
     private lateinit var wifiController: WifiController
 
-    // 双Provider名称
     private val GPS_PROVIDER = LocationManager.GPS_PROVIDER
     private val NETWORK_PROVIDER = LocationManager.NETWORK_PROVIDER
 
-    // 当前模拟坐标
     private var currentLat = 0.0
     private var currentLng = 0.0
-
-    // 推送计数器
     private var pushCount = 0L
-
-    // Provider是否已注册
     private var gpsRegistered = false
     private var networkRegistered = false
 
-    // 定时推送Handler
+    // 错误信息
+    @Volatile var lastError: String? = null
+        private set
+
     private val handler = Handler(Looper.getMainLooper())
-    private val pushInterval = 500L // 500ms推送间隔
+    private val pushInterval = 500L
     private val pushRunnable = object : Runnable {
         override fun run() {
             pushLocation()
@@ -67,78 +64,91 @@ class MockLocationService : Service() {
             currentLng = lng
         }
 
-        startMocking()
-        return START_STICKY
+        lastError = null
+        val success = startMocking()
+        if (!success) {
+            // 启动失败，停止Service
+            stopSelf()
+        }
+        return START_NOT_STICKY
     }
 
     /**
-     * 开始模拟：注册Provider + 启动推送循环
+     * 开始模拟：注册Provider + 推送循环
+     * @return true = 成功, false = 失败
      */
-    private fun startMocking() {
-        if (isRunning) return
+    private fun startMocking(): Boolean {
+        if (isRunning) return true
 
-        // WiFi自动控制
+        // 验证模拟位置权限
+        if (!checkMockPermission()) {
+            lastError = "未设置模拟位置应用"
+            return false
+        }
+
+        // WiFi控制
         wifiController.disableForMock()
 
-        // 注册GPS Provider
-        registerProvider(GPS_PROVIDER)
+        // 注册Provider
+        val gpsOk = registerProvider(GPS_PROVIDER)
+        val netOk = registerProvider(NETWORK_PROVIDER)
 
-        // 注册NETWORK Provider
-        registerProvider(NETWORK_PROVIDER)
+        if (!gpsOk && !netOk) {
+            lastError = "Provider注册失败：请在开发者选项中将「宁宁模拟」设为模拟位置应用"
+            wifiController.restoreWifiState()
+            return false
+        }
 
-        // 启动前台通知
+        // 前台通知
         startForeground(NOTIFICATION_ID, buildNotification())
 
-        // 初始化位置记忆
         LocationHooks.updateLastPosition(currentLat, currentLng)
 
-        // 开始推送循环
         isRunning = true
         pushCount = 0
         handler.post(pushRunnable)
+        return true
     }
 
     /**
-     * 注册Mock Provider（兼容新旧API）
+     * 检查是否设置了正确的模拟位置应用
      */
-    private fun registerProvider(provider: String) {
-        try {
-            // 先移除旧的（如果存在）
-            try {
-                locationManager.removeTestProvider(provider)
-            } catch (_: Exception) {}
+    private fun checkMockPermission(): Boolean {
+        return try {
+            val mockApp = Settings.Secure.getString(contentResolver, "mock_location")
+            mockApp == packageName
+        } catch (_: Exception) {
+            true // 无法读取时继续尝试
+        }
+    }
 
-            // 使用反射兼容新旧API
-            try {
-                // 尝试新版API (Android S+)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val builderClass = Class.forName("android.location.provider.ProviderProperties\$Builder")
-                    val builder = builderClass.getConstructor().newInstance()
-                    builderClass.getMethod("setHasAltitudeSupport", Boolean::class.java).invoke(builder, true)
-                    builderClass.getMethod("setHasSpeedSupport", Boolean::class.java).invoke(builder, true)
-                    builderClass.getMethod("setHasBearingSupport", Boolean::class.java).invoke(builder, true)
-                    builderClass.getMethod("setPowerUsage", Int::class.java).invoke(builder, 1) // POWER_USAGE_MEDIUM=1
-                    builderClass.getMethod("setAccuracy", Int::class.java).invoke(builder, 1)   // ACCURACY_FINE=1
-                    val props = builderClass.getMethod("build").invoke(builder)
-                    val method = LocationManager::class.java.getMethod("addTestProvider", String::class.java, props.javaClass)
-                    method.invoke(locationManager, provider, props)
-                } else {
-                    @Suppress("DEPRECATION")
-                    locationManager.addTestProvider(
-                        provider,
-                        false, true, false, false, true, true, true,
-                        Criteria.POWER_MEDIUM,
-                        Criteria.ACCURACY_FINE
-                    )
-                }
-            } catch (refError: Exception) {
-                // 反射失败，降级使用旧API
+    /**
+     * 注册 Mock Provider
+     * @return true = 成功
+     */
+    private fun registerProvider(provider: String): Boolean {
+        return try {
+            try { locationManager.removeTestProvider(provider) } catch (_: Exception) {}
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Android 12+ 使用反射调用新版API
+                val builderClass = Class.forName("android.location.provider.ProviderProperties\$Builder")
+                val builder = builderClass.getConstructor().newInstance()
+                builderClass.getMethod("setHasAltitudeSupport", Boolean::class.java).invoke(builder, true)
+                builderClass.getMethod("setHasSpeedSupport", Boolean::class.java).invoke(builder, true)
+                builderClass.getMethod("setHasBearingSupport", Boolean::class.java).invoke(builder, true)
+                builderClass.getMethod("setPowerUsage", Int::class.java).invoke(builder, 1)
+                builderClass.getMethod("setAccuracy", Int::class.java).invoke(builder, 1)
+                val props = builderClass.getMethod("build").invoke(builder)
+                val method = LocationManager::class.java.getMethod("addTestProvider",
+                    String::class.java, props.javaClass)
+                method.invoke(locationManager, provider, props)
+            } else {
                 @Suppress("DEPRECATION")
                 locationManager.addTestProvider(
                     provider,
                     false, true, false, false, true, true, true,
-                    Criteria.POWER_MEDIUM,
-                    Criteria.ACCURACY_FINE
+                    Criteria.POWER_MEDIUM, Criteria.ACCURACY_FINE
                 )
             }
 
@@ -147,80 +157,81 @@ class MockLocationService : Service() {
             if (provider == GPS_PROVIDER) gpsRegistered = true
             else networkRegistered = true
 
+            true
         } catch (e: SecurityException) {
-            // 需要在开发者选项中启用"选择模拟位置信息应用"
-            stopSelf()
+            // 模拟位置应用未设置
+            lastError = "SecurityException: 请在开发者选项中设置模拟位置应用"
+            false
         } catch (e: Exception) {
-            // Provider已存在或其他错误
+            lastError = "Provider注册异常: ${e.message}"
+            false
         }
     }
 
     /**
-     * 推送位置到所有已注册的Provider
+     * 推送位置
      */
     private fun pushLocation() {
         if (!isRunning) return
         pushCount++
 
-        // 添加GPS自然漂移
         val (driftedLat, driftedLng) = LocationHooks.applyDrift(currentLat, currentLng)
 
-        // 推送到GPS Provider
         if (gpsRegistered) {
             val gpsLoc = LocationHooks.buildRealisticLocation(GPS_PROVIDER, driftedLat, driftedLng)
             try {
                 locationManager.setTestProviderLocation(GPS_PROVIDER, gpsLoc)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                // Provider可能被系统移除了，尝试重新注册
+                if (e is IllegalArgumentException || e is SecurityException) {
+                    gpsRegistered = false
+                    if (registerProvider(GPS_PROVIDER)) {
+                        try {
+                            locationManager.setTestProviderLocation(GPS_PROVIDER, gpsLoc)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
         }
 
-        // 推送到NETWORK Provider
         if (networkRegistered) {
             val netLoc = LocationHooks.buildRealisticLocation(NETWORK_PROVIDER, driftedLat, driftedLng)
             try {
                 locationManager.setTestProviderLocation(NETWORK_PROVIDER, netLoc)
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                if (e is IllegalArgumentException || e is SecurityException) {
+                    networkRegistered = false
+                    if (registerProvider(NETWORK_PROVIDER)) {
+                        try {
+                            locationManager.setTestProviderLocation(NETWORK_PROVIDER, netLoc)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
         }
 
-        // 更新位置记忆（用于方向角计算）
         LocationHooks.updateLastPosition(currentLat, currentLng)
 
-        // 每20次推送更新一次通知（即每10秒）
         if (pushCount % 20 == 0L) {
             updateNotification()
         }
     }
 
-    /**
-     * 停止模拟
-     */
     fun stopMocking() {
         isRunning = false
         handler.removeCallbacks(pushRunnable)
 
-        // 移除Provider
         try { locationManager.removeTestProvider(GPS_PROVIDER) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(NETWORK_PROVIDER) } catch (_: Exception) {}
         gpsRegistered = false
         networkRegistered = false
 
-        // 恢复WiFi
         wifiController.restoreWifiState()
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
-    /**
-     * 更新当前坐标（Activity实时传入）
-     */
-    fun updateLocation(lat: Double, lng: Double) {
-        currentLat = lat
-        currentLng = lng
-    }
-
-    /**
-     * 获取当前状态
-     */
     fun getStatus(): MockStatus {
         return MockStatus(
             isRunning = isRunning,
@@ -230,36 +241,23 @@ class MockLocationService : Service() {
             gpsRegistered = gpsRegistered,
             networkRegistered = networkRegistered,
             wifiEnabled = wifiController.isWifiEnabled(),
-            mockLocationApp = getMockLocationApp()
+            mockLocationApp = getMockLocationApp(),
+            error = lastError
         )
     }
 
-    /**
-     * 获取系统设置的模拟位置信息应用
-     */
     private fun getMockLocationApp(): String {
         return try {
-            val mockApp = Settings.Secure.getString(
-                contentResolver,
-                "mock_location"
-            )
-            mockApp ?: "未设置"
-        } catch (_: Exception) {
-            "无法读取"
-        }
+            Settings.Secure.getString(contentResolver, "mock_location") ?: "未设置"
+        } catch (_: Exception) { "无法读取" }
     }
 
-    /**
-     * 创建通知渠道（Android O+）
-     */
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                CHANNEL_ID,
-                "位置服务",
-                NotificationManager.IMPORTANCE_LOW
+                CHANNEL_ID, "位置服务", NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "宁宁模拟位置服务"
+                description = "位置服务通知"
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -267,9 +265,6 @@ class MockLocationService : Service() {
         }
     }
 
-    /**
-     * 构建前台通知 — 伪装为普通"位置服务"
-     */
     private fun buildNotification(): Notification {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("位置服务运行中")
@@ -280,18 +275,15 @@ class MockLocationService : Service() {
             .build()
     }
 
-    /**
-     * 更新通知内容
-     */
     private fun updateNotification() {
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("位置服务运行中")
-            .setContentText("已推送 ${pushCount}次 | 坐标: ${"%.4f".format(currentLat)}, ${"%.4f".format(currentLng)}")
+            .setContentText("已推送 ${pushCount}次 | " +
+                    "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-
         val manager = getSystemService(NotificationManager::class.java)
         manager.notify(NOTIFICATION_ID, notification)
     }
@@ -312,7 +304,8 @@ class MockLocationService : Service() {
         val gpsRegistered: Boolean,
         val networkRegistered: Boolean,
         val wifiEnabled: Boolean,
-        val mockLocationApp: String
+        val mockLocationApp: String,
+        val error: String? = null
     )
 
     companion object {
