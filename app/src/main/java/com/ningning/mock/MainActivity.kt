@@ -513,12 +513,12 @@ class MainActivity : AppCompatActivity() {
         try {
             val mockApp = Settings.Secure.getString(
                 contentResolver,
-                Settings.Secure.MOCK_LOCATION
+                "mock_location"
             )
             if (mockApp.isNullOrEmpty() || mockApp == "0") {
                 AlertDialog.Builder(this)
                     .setTitle("需要开启模拟位置")
-                    .setMessage("请在 设置 → 开发者选项 → 选择模拟位置信息应用 中选择"宁宁模拟"\n\n如果未开启开发者选项，请前往 设置 → 关于手机 → 连续点击"版本号"7次。")
+                    .setMessage("请在 设置 -> 开发者选项 -> 选择模拟位置信息应用 中选择「宁宁模拟」\n\n如果未开启开发者选项，请前往 设置 -> 关于手机 -> 连续点击「版本号」7次。")
                     .setPositiveButton("去设置") { _, _ ->
                         startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
                     }

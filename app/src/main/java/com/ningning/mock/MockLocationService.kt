@@ -108,28 +108,35 @@ class MockLocationService : Service() {
                 locationManager.removeTestProvider(provider)
             } catch (_: Exception) {}
 
-            // 尝试新版API (Android S+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val props = LocationManager.ProviderProperties.Builder()
-                    .setHasAltitudeSupport(true)
-                    .setHasSpeedSupport(true)
-                    .setHasBearingSupport(true)
-                    .setPowerUsage(LocationManager.ProviderProperties.POWER_USAGE_MEDIUM)
-                    .setAccuracy(LocationManager.ProviderProperties.ACCURACY_FINE)
-                    .build()
-                locationManager.addTestProvider(provider, props)
-            } else {
-                // 旧版API
+            // 使用反射兼容新旧API
+            try {
+                // 尝试新版API (Android S+)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val builderClass = Class.forName("android.location.provider.ProviderProperties\$Builder")
+                    val builder = builderClass.getConstructor().newInstance()
+                    builderClass.getMethod("setHasAltitudeSupport", Boolean::class.java).invoke(builder, true)
+                    builderClass.getMethod("setHasSpeedSupport", Boolean::class.java).invoke(builder, true)
+                    builderClass.getMethod("setHasBearingSupport", Boolean::class.java).invoke(builder, true)
+                    builderClass.getMethod("setPowerUsage", Int::class.java).invoke(builder, 1) // POWER_USAGE_MEDIUM=1
+                    builderClass.getMethod("setAccuracy", Int::class.java).invoke(builder, 1)   // ACCURACY_FINE=1
+                    val props = builderClass.getMethod("build").invoke(builder)
+                    val method = LocationManager::class.java.getMethod("addTestProvider", String::class.java, props.javaClass)
+                    method.invoke(locationManager, provider, props)
+                } else {
+                    @Suppress("DEPRECATION")
+                    locationManager.addTestProvider(
+                        provider,
+                        false, true, false, false, true, true, true,
+                        Criteria.POWER_MEDIUM,
+                        Criteria.ACCURACY_FINE
+                    )
+                }
+            } catch (refError: Exception) {
+                // 反射失败，降级使用旧API
                 @Suppress("DEPRECATION")
                 locationManager.addTestProvider(
                     provider,
-                    false,   // requiresNetwork
-                    true,    // requiresSatellite (GPS=true)
-                    false,   // requiresCell
-                    false,   // hasMonetaryCost
-                    true,    // supportsAltitude
-                    true,    // supportsSpeed
-                    true,    // supportsBearing
+                    false, true, false, false, true, true, true,
                     Criteria.POWER_MEDIUM,
                     Criteria.ACCURACY_FINE
                 )
@@ -234,7 +241,7 @@ class MockLocationService : Service() {
         return try {
             val mockApp = Settings.Secure.getString(
                 contentResolver,
-                Settings.Secure.MOCK_LOCATION
+                "mock_location"
             )
             mockApp ?: "未设置"
         } catch (_: Exception) {
