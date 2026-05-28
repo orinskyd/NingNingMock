@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.location.Geocoder
 import android.location.LocationManager
 import android.net.Uri
 import android.os.Build
@@ -34,6 +35,7 @@ import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.compass.CompassOverlay
 import java.net.URLEncoder
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
 
@@ -151,12 +153,51 @@ class MainActivity : AppCompatActivity() {
 
     private fun reverseGeocode(lat: Double, lng: Double) {
         Thread {
-            val name = reverseGeocodeAmap(lat, lng)
+            // 先用 Geocoder
+            var name = reverseGeocodeSystem(lat, lng)
+            // 如果 Geocoder 失败，用高德
+            if (name == null) {
+                name = reverseGeocodeAmap(lat, lng)
+            }
             val displayName = name ?: "已选位置"
             runOnUiThread {
                 binding.tvLocationName.text = displayName
             }
         }.start()
+    }
+
+    /**
+     * Android 系统内置 Geocoder 反向地理编码
+     * 优点：不需要 API key，不需要网络（部分手机离线可用）
+     */
+    @Suppress("DEPRECATION")
+    private fun reverseGeocodeSystem(lat: Double, lng: Double): String? {
+        return try {
+            val geocoder = Geocoder(this, Locale.CHINA)
+            val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                // Android 13+ 用新 API
+                val results = mutableListOf<android.location.Address>()
+                val listener = Geocoder.GeocodeListener { addrs ->
+                    results.addAll(addrs)
+                }
+                geocoder.getFromLocation(lat, lng, 1, listener)
+                Thread.sleep(500) // 等待回调
+                results.firstOrNull()
+            } else {
+                geocoder.getFromLocation(lat, lng, 1)?.firstOrNull()
+            }
+            addresses?.let { addr ->
+                val parts = mutableListOf<String>()
+                addr.locality?.let { parts.add(it) }
+                addr.subLocality?.let { parts.add(it) }
+                addr.thoroughfare?.let { parts.add(it) }
+                addr.featureName?.let { parts.add(it) }
+                if (parts.isNotEmpty()) parts.joinToString("") else addr.getAddressLine(0)
+            }
+        } catch (e: Exception) {
+            Log.d("ReverseGeo", "Geocoder failed: ${e.message}")
+            null
+        }
     }
 
     private fun reverseGeocodeAmap(lat: Double, lng: Double): String? {
@@ -203,6 +244,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 搜索流程：
+     * 1. Android Geocoder（系统内置，不需要API key）
+     * 2. 高德 POI 搜索（需要网络和有效key）
+     * 3. 高德 Geocoding API（备用）
+     *
+     * 每一步都有详细错误提示
+     */
     private fun doSearch(query: String) {
         Toast.makeText(this, "正在搜索: $query ...", Toast.LENGTH_SHORT).show()
         binding.btnSearch.isEnabled = false
@@ -210,18 +259,54 @@ class MainActivity : AppCompatActivity() {
 
         Thread {
             try {
-                val encodedQuery = URLEncoder.encode(query, "UTF-8")
-                val result = searchViaAmap(encodedQuery, query)
+                var results: List<SearchResult>? = null
+                var errorMsg = ""
+
+                // 1. 先试 Android Geocoder
+                results = searchViaGeocoder(query)
+                if (results != null && results.isNotEmpty()) {
+                    Log.d("Search", "Geocoder found ${results.size} results")
+                } else {
+                    Log.d("Search", "Geocoder returned empty: ${results?.size ?: "null"}")
+                    errorMsg = "系统搜索无结果。"
+
+                    // 2. 试高德 POI 搜索
+                    try {
+                        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+                        results = searchViaAmap(encodedQuery)
+                        if (results != null && results.isNotEmpty()) {
+                            Log.d("Search", "Amap POI found ${results.size} results")
+                        } else {
+                            Log.d("Search", "Amap POI returned empty")
+                            errorMsg += " 高德搜索无结果。"
+
+                            // 3. 试高德地理编码
+                            results = searchViaAmapGeocode(encodedQuery)
+                            if (results != null && results.isNotEmpty()) {
+                                Log.d("Search", "Amap Geocode found ${results.size} results")
+                            } else {
+                                Log.d("Search", "Amap Geocode returned empty")
+                                errorMsg += " 地理编码也无结果。"
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.d("Search", "Amap error: ${e.message}")
+                        errorMsg += " 高德API异常: ${e.message}"
+                    }
+                }
+
+                val finalResults = results
+                val finalError = errorMsg
 
                 runOnUiThread {
                     binding.btnSearch.isEnabled = true
                     binding.progressSearch.visibility = View.GONE
 
-                    if (result != null && result.isNotEmpty()) {
-                        showSearchResults(result)
+                    if (finalResults != null && finalResults.isNotEmpty()) {
+                        showSearchResults(finalResults)
                     } else {
                         Toast.makeText(this,
-                            "未找到: $query\n请尝试更短的搜索词", Toast.LENGTH_LONG).show()
+                            "未找到: $query\n$finalError", Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
@@ -236,12 +321,66 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * 高德 POI 搜索
-     * 去掉 citylimit，搜索范围更广
-     * extensions=base 减少数据量
-     * 超时10秒
+     * 方法1: Android 系统内置 Geocoder
+     * 优点：不需要 API key，在中国手机上通常使用高德/百度后端
      */
-    private fun searchViaAmap(encodedQuery: String, rawQuery: String): List<SearchResult>? {
+    @Suppress("DEPRECATION")
+    private fun searchViaGeocoder(query: String): List<SearchResult>? {
+        return try {
+            val geocoder = Geocoder(this, Locale.CHINA)
+            if (!geocoder.isPresent) {
+                Log.d("Search", "Geocoder not present on this device")
+                return null
+            }
+
+            val addresses = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val results = mutableListOf<android.location.Address>()
+                val listener = Geocoder.GeocodeListener { addrs ->
+                    results.addAll(addrs)
+                }
+                geocoder.getFromLocationName(query, 10, listener)
+                Thread.sleep(2000) // 等待回调
+                results
+            } else {
+                geocoder.getFromLocationName(query, 10) ?: emptyList()
+            }
+
+            if (addresses.isEmpty()) {
+                Log.d("Search", "Geocoder returned 0 addresses")
+                return null
+            }
+
+            val results = mutableListOf<SearchResult>()
+            for (addr in addresses) {
+                val lat = addr.latitude
+                val lng = addr.longitude
+                if (lat == 0.0 && lng == 0.0) continue
+
+                val name = StringBuilder()
+                addr.locality?.let { name.append(it) }
+                addr.subLocality?.let { name.append(it) }
+                addr.thoroughfare?.let { name.append(it) }
+                addr.featureName?.let {
+                    if (name.isNotEmpty()) name.append(" ")
+                    name.append(it)
+                }
+                val displayName = if (name.isNotEmpty()) name.toString() else addr.getAddressLine(0) ?: "未知地点"
+
+                results.add(SearchResult(displayName, lat, lng))
+            }
+
+            Log.d("Search", "Geocoder found ${results.size} valid results")
+            if (results.isEmpty()) null else results
+        } catch (e: Exception) {
+            Log.d("Search", "Geocoder error: ${e.javaClass.simpleName}: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 方法2: 高德 POI 搜索
+     */
+    private fun searchViaAmap(encodedQuery: String): List<SearchResult>? {
         val result = mutableListOf<SearchResult>()
         try {
             val url = "https://restapi.amap.com/v3/place/text" +
@@ -250,7 +389,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.7")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.8")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -259,25 +398,22 @@ class MainActivity : AppCompatActivity() {
             }
 
             val body = conn.inputStream.bufferedReader().readText()
-            Log.d("Search", "Amap response length: ${body.length}")
+            Log.d("Search", "Amap POI response length: ${body.length}")
 
-            // Check status
             if (body.contains("\"status\":\"0\"")) {
-                // Extract infocode for error detail
                 val infoCode = extractJsonStr(body, "\"infocode\":\"") ?: "unknown"
                 Log.e("Search", "Amap status=0, infocode=$infoCode")
                 return null
             }
 
-            // Parse pois
             if (!body.contains("\"pois\"")) {
-                Log.e("Search", "Amap response has no pois field")
+                Log.e("Search", "Amap no pois field")
                 return null
             }
 
             val poisSection = body.substring(body.indexOf("\"pois\":"))
             val pois = poisSection.split("{\"id\":\"")
-            Log.d("Search", "Found ${pois.size - 1} POIs")
+            Log.d("Search", "Found ${pois.size - 1} POIs from Amap")
 
             for (i in 1 until pois.size) {
                 val poi = pois[i]
@@ -301,7 +437,53 @@ class MainActivity : AppCompatActivity() {
             Log.e("Search", "Amap error: ${e.javaClass.simpleName} ${e.message}")
             return null
         }
-        return result
+        return if (result.isEmpty()) null else result
+    }
+
+    /**
+     * 方法3: 高德地理编码（把地址转坐标，和POI搜索不同）
+     */
+    private fun searchViaAmapGeocode(encodedQuery: String): List<SearchResult>? {
+        return try {
+            val url = "https://restapi.amap.com/v3/geocode/geo" +
+                    "?key=$amapKey&address=$encodedQuery&output=json"
+            val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 8000
+            conn.readTimeout = 8000
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.8")
+            val body = conn.inputStream.bufferedReader().readText()
+            Log.d("Search", "Amap geocode response: ${body.length} chars")
+
+            if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
+                Log.e("Search", "Amap geocode failed: ${body.substring(0, minOf(200, body.length))}")
+                return null
+            }
+
+            val geocodesSection = body.substring(body.indexOf("\"geocodes\":"))
+            val geocodes = geocodesSection.split("{\"formatted_address\":\"")
+            val results = mutableListOf<SearchResult>()
+
+            for (i in 1 until geocodes.size) {
+                val gc = geocodes[i]
+                val addr = extractJsonStr(gc, "\"formatted_address\":\"") ?: continue
+                val location = extractJsonStr(gc, "\"location\":\"") ?: continue
+                val district = extractJsonStr(gc, "\"district\":\"") ?: ""
+                val city = extractJsonStr(gc, "\"city\":\"") ?: ""
+                val province = extractJsonStr(gc, "\"province\":\"") ?: ""
+                val parts = location.split(",")
+                if (parts.size == 2) {
+                    val lng = parts[0].toDoubleOrNull() ?: continue
+                    val lat = parts[1].toDoubleOrNull() ?: continue
+                    val name = "$addr ($province$city$district)"
+                    results.add(SearchResult(name, lat, lng))
+                }
+            }
+
+            if (results.isEmpty()) null else results
+        } catch (e: Exception) {
+            Log.e("Search", "Amap geocode error: ${e.message}")
+            null
+        }
     }
 
     private fun extractJsonStr(json: String, key: String): String? {
@@ -403,6 +585,34 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startMocking() {
+        // 检查开发者选项中的模拟位置应用
+        val mockApp = try {
+            Settings.Secure.getString(contentResolver, "mock_location") ?: ""
+        } catch (_: Exception) { "" }
+
+        if (mockApp.isEmpty() || !mockApp.contains(packageName)) {
+            AlertDialog.Builder(this)
+                .setTitle("请先设置模拟位置应用")
+                .setMessage(
+                    "当前未设置模拟位置应用。\n\n" +
+                    "请按以下步骤操作：\n\n" +
+                    "1. 打开「设置」\n" +
+                    "2. 找到「开发者选项」\n" +
+                    "   （如果没有：设置-关于手机-连续点击「版本号」7次）\n" +
+                    "3. 找到「选择模拟位置信息应用」\n" +
+                    "4. 选择「宁宁模拟」\n\n" +
+                    "设置完成后返回本APP重新操作。"
+                )
+                .setPositiveButton("去开发者选项") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                }
+                .setNegativeButton("取消", null)
+                .setCancelable(false)
+                .show()
+            return
+        }
+
+        // 检查 WiFi
         val wifiManager = getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
         if (wifiManager.isWifiEnabled) {
             AlertDialog.Builder(this)
@@ -436,6 +646,7 @@ class MainActivity : AppCompatActivity() {
         updateUIState()
         startStatusUpdates()
 
+        // 等待1.5秒后检查模拟是否成功
         handler.postDelayed({
             if (!serviceBound) {
                 showMockErrorDialog("服务启动失败，请尝试重新打开APP")
@@ -444,15 +655,59 @@ class MainActivity : AppCompatActivity() {
             }
             val status = mockService?.getStatus()
             if (status != null) {
-                if (!status.gpsRegistered && !status.networkRegistered) {
-                    val errMsg = status.error ?: "未知错误"
-                    showMockErrorDialog(errMsg)
+                // 检查 Provider 注册情况
+                val registered = mutableListOf<String>()
+                if (status.gpsRegistered) registered.add("GPS")
+                if (status.networkRegistered) registered.add("NET")
+                if (status.fusedRegistered) registered.add("FUSED")
+                if (status.passiveRegistered) registered.add("PASSIVE")
+
+                val errorMsg = status.error
+
+                if (registered.isEmpty()) {
+                    // 全部注册失败
+                    val msg = errorMsg ?: "Provider注册失败"
+                    Log.e("MockCheck", "All providers failed: $msg")
+                    showMockErrorDialog(msg)
                     stopMocking()
                 } else {
-                    val detail = buildProviderDetail(status)
-                    Toast.makeText(this, "模拟已启动 $detail", Toast.LENGTH_LONG).show()
+                    // 至少有一个成功，验证模拟是否生效
+                    val mockApp = status.mockLocationApp
+                    val detail = registered.joinToString("+")
+                    Log.d("MockCheck", "Providers OK: $detail, mockApp=$mockApp")
+
+                    // 尝试读取 mock provider 的位置来验证
+                    var verifyOk = false
+                    try {
+                        val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+                        if (status.gpsRegistered) {
+                            val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                            if (loc != null) {
+                                verifyOk = true
+                                Log.d("MockCheck", "GPS verify OK: ${loc.latitude}, ${loc.longitude}")
+                            }
+                        }
+                        if (!verifyOk && status.networkRegistered) {
+                            val loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                            if (loc != null) {
+                                verifyOk = true
+                                Log.d("MockCheck", "NET verify OK: ${loc.latitude}, ${loc.longitude}")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("MockCheck", "Verify error: ${e.message}")
+                    }
+
+                    val verifyMsg = if (verifyOk) "（已验证生效）" else "（验证中...）"
+                    Toast.makeText(this,
+                        "模拟已启动 [$detail] $verifyMsg",
+                        Toast.LENGTH_LONG).show()
+
                     showMockTips()
                 }
+            } else {
+                Log.e("MockCheck", "Status is null after 1.5s")
+                Toast.makeText(this, "正在初始化模拟...", Toast.LENGTH_SHORT).show()
             }
         }, 1500)
     }
@@ -491,8 +746,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v3", false)) return
-        prefs.edit().putBoolean("mock_tips_v3", true).apply()
+        if (prefs.getBoolean("mock_tips_v4", false)) return
+        prefs.edit().putBoolean("mock_tips_v4", true).apply()
         AlertDialog.Builder(this)
             .setTitle("模拟已启动")
             .setMessage(
@@ -504,7 +759,9 @@ class MainActivity : AppCompatActivity() {
                 "3. 确认开发者选项中已选择「宁宁模拟」\n" +
                 "   设置-开发者选项-选择模拟位置信息应用。\n\n" +
                 "4. 保持本APP在后台运行\n" +
-                "   不要从最近任务中划掉。"
+                "   不要从最近任务中划掉。\n\n" +
+                "5. 打开目标APP后等待几秒\n" +
+                "   新位置需要时间传播。"
             )
             .setPositiveButton("我知道了", null)
             .show()
@@ -543,7 +800,8 @@ class MainActivity : AppCompatActivity() {
         if (serviceBound && mockService != null) {
             val s = mockService!!.getStatus()
             val detail = buildProviderDetail(s)
-            binding.tvStatus.text = "推送: ${s.pushCount}次 | $detail"
+            val pushInfo = "推送: ${s.pushCount}次 [$detail]"
+            binding.tvStatus.text = pushInfo
             if (s.wifiEnabled) {
                 binding.tvWifiStatus.text = "WiFi开启! 目标APP可能检测到真实位置"
             } else {
