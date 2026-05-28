@@ -600,7 +600,9 @@ class MainActivity : AppCompatActivity() {
                     stopMocking()
                 } else {
                     // 至少一个Provider成功了
-                    Toast.makeText(this, "模拟已启动！GPS:${if(status.gpsRegistered) "✓" else "✗"} NET:${if(status.networkRegistered) "✓" else "✗"}", Toast.LENGTH_SHORT).show()
+                    val gpsMark = if(status.gpsRegistered) "✓" else "✗"
+                    val netMark = if(status.networkRegistered) "✓" else "✗"
+                    Toast.makeText(this, "模拟已启动！GPS:$gpsMark NET:$netMark", Toast.LENGTH_SHORT).show()
                     showMockTips()
                 }
             }
@@ -692,7 +694,9 @@ class MainActivity : AppCompatActivity() {
     private fun updateStatus() {
         if (serviceBound && mockService != null) {
             val s = mockService!!.getStatus()
-            var statusText = "推送: ${s.pushCount}次 | GPS:${if(s.gpsRegistered) "✓" else "✗"} NET:${if(s.networkRegistered) "✓" else "✗"}"
+            val gpsMark = if(s.gpsRegistered) "✓" else "✗"
+            val netMark = if(s.networkRegistered) "✓" else "✗"
+            var statusText = "推送: ${s.pushCount}次 | GPS:$gpsMark NET:$netMark"
             binding.tvStatus.text = statusText
 
             // WiFi警告
