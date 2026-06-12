@@ -26,6 +26,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.ningning.mock.databinding.ActivityMainBinding
+import org.json.JSONArray
+import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
@@ -88,7 +90,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "NingNingMock/1.9"
+            userAgentValue = "NingNingMock/1.10"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -99,6 +101,7 @@ class MainActivity : AppCompatActivity() {
         setupMap()
         setupButtons()
         setupSearch()
+        restoreLastLocation()
     }
 
     private fun setupMap() {
@@ -218,6 +221,7 @@ class MainActivity : AppCompatActivity() {
         }
         binding.fabMyLocation.setOnClickListener { goToMyLocation() }
         binding.fabLayer.setOnClickListener { toggleMapLayer() }
+        binding.fabHistory.setOnClickListener { showHistoryDialog() }
     }
 
     private fun setupSearch() {
@@ -233,6 +237,144 @@ class MainActivity : AppCompatActivity() {
             if (query.isNotEmpty()) doSearch(query)
         }
     }
+
+    // ==================== 定位历史记录 ====================
+
+    private data class HistoryItem(val name: String, val lat: Double, val lng: Double, val time: Long)
+
+    private fun saveToHistory(lat: Double, lng: Double, name: String) {
+        try {
+            val history = loadHistory().toMutableList()
+            // 去重：如果同一位置（0.001度内）已存在则更新
+            val existingIdx = history.indexOfFirst {
+                kotlin.math.abs(it.lat - lat) < 0.001 && kotlin.math.abs(it.lng - lng) < 0.001
+            }
+            if (existingIdx >= 0) {
+                history.removeAt(existingIdx)
+            }
+            history.add(0, HistoryItem(name, lat, lng, System.currentTimeMillis()))
+            // 最多保留 20 条
+            while (history.size > 20) {
+                history.removeAt(history.size - 1)
+            }
+            val arr = JSONArray()
+            for (item in history) {
+                val obj = JSONObject()
+                obj.put("name", item.name)
+                obj.put("lat", item.lat)
+                obj.put("lng", item.lng)
+                obj.put("time", item.time)
+                arr.put(obj)
+            }
+            prefs.edit().putString("location_history", arr.toString()).apply()
+            Log.d("History", "Saved ${history.size} items")
+        } catch (e: Exception) {
+            Log.e("History", "Save failed: ${e.message}")
+        }
+    }
+
+    private fun loadHistory(): List<HistoryItem> {
+        val result = mutableListOf<HistoryItem>()
+        try {
+            val json = prefs.getString("location_history", null) ?: return result
+            val arr = JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                result.add(HistoryItem(
+                    obj.getString("name"),
+                    obj.getDouble("lat"),
+                    obj.getDouble("lng"),
+                    obj.getLong("time")
+                ))
+            }
+        } catch (e: Exception) {
+            Log.e("History", "Load failed: ${e.message}")
+        }
+        return result
+    }
+
+    private fun showHistoryDialog() {
+        val history = loadHistory()
+        if (history.isEmpty()) {
+            Toast.makeText(this, "暂无历史记录，模拟定位后自动保存", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val items = history.mapIndexed { i, h ->
+            val dateStr = formatTime(h.time)
+            val shortName = if (h.name.length > 18) h.name.substring(0, 18) + "..." else h.name
+            "${i + 1}. $shortName\n   ${"%.5f, %.5f".format(h.lat, h.lng)}  $dateStr"
+        }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("定位历史 (${history.size}条)")
+            .setItems(items) { _, which ->
+                val h = history[which]
+                val point = GeoPoint(h.lat, h.lng)
+
+                // 跳转地图
+                binding.mapView.controller.animateTo(point)
+                binding.mapView.controller.setZoom(17.0)
+
+                // 设置选点
+                selectedLat = h.lat
+                selectedLng = h.lng
+
+                currentMarker?.let { binding.mapView.overlays.remove(it) }
+                currentMarker = Marker(binding.mapView).apply {
+                    position = point
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    title = h.name
+                    snippet = "%.5f, %.5f".format(h.lat, h.lng)
+                    setOnMarkerClickListener { marker, _ ->
+                        marker.showInfoWindow()
+                        true
+                    }
+                }
+                binding.mapView.overlays.add(currentMarker)
+                binding.mapView.invalidate()
+
+                updateSelectedUI(h.lat, h.lng)
+                Toast.makeText(this, "已选择: ${h.name}", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("关闭", null)
+            .setNeutralButton("清空") { _, _ ->
+                prefs.edit().remove("location_history").apply()
+                Toast.makeText(this, "历史已清空", Toast.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun formatTime(timestamp: Long): String {
+        val sdf = java.text.SimpleDateFormat("MM-dd HH:mm", Locale.CHINA)
+        return sdf.format(java.util.Date(timestamp))
+    }
+
+    /** 启动时恢复上次模拟的位置 */
+    private fun restoreLastLocation() {
+        val lastLat = prefs.getFloat("last_lat", 0f).toDouble()
+        val lastLng = prefs.getFloat("last_lng", 0f).toDouble()
+        if (lastLat != 0.0 && lastLng != 0.0) {
+            selectedLat = lastLat
+            selectedLng = lastLng
+            val point = GeoPoint(lastLat, lastLng)
+            binding.mapView.controller.setCenter(point)
+
+            currentMarker = Marker(binding.mapView).apply {
+                position = point
+                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                title = "上次模拟位置"
+                snippet = "%.5f, %.5f".format(lastLat, lastLng)
+            }
+            binding.mapView.overlays.add(currentMarker)
+            binding.mapView.invalidate()
+
+            updateSelectedUI(lastLat, lastLng)
+            Log.d("Restore", "Restored last location: $lastLat, $lastLng")
+        }
+    }
+
+    // ==================== 搜索功能 ====================
 
     private fun doSearch(query: String) {
         Toast.makeText(this, "正在搜索: $query ...", Toast.LENGTH_SHORT).show()
@@ -348,7 +490,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.9")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.10")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -406,7 +548,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.9")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.10")
             val body = conn.inputStream.bufferedReader().readText()
             Log.d("Search", "Amap geocode response: ${body.length} chars")
 
@@ -465,14 +607,11 @@ class MainActivity : AppCompatActivity() {
                 val r = results[which]
                 val targetPoint = GeoPoint(r.lat, r.lng)
 
-                // 先跳转地图中心到目标位置
                 binding.mapView.controller.animateTo(targetPoint)
                 binding.mapView.controller.setZoom(17.0)
 
-                // 清除搜索标记
                 searchMarker?.let { binding.mapView.overlays.remove(it) }
 
-                // 放置搜索结果标记
                 searchMarker = Marker(binding.mapView).apply {
                     position = targetPoint
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
@@ -485,12 +624,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 binding.mapView.overlays.add(searchMarker)
 
-                // 同时更新选点
                 selectedLat = r.lat
                 selectedLng = r.lng
                 updateSelectedUI(r.lat, r.lng)
 
-                // 强制刷新地图
                 binding.mapView.invalidate()
 
                 binding.etSearch.setText("")
@@ -500,80 +637,16 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showAmapKeySetup() {
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT
-            hint = "粘贴你的高德 Web服务 Key"
-            setText(amapKey)
-        }
-        AlertDialog.Builder(this)
-            .setTitle("配置高德地图 Key")
-            .setMessage("搜索需要高德 Web服务 API Key。\n\n" +
-                    "1. 打开 https://lbs.amap.com/\n" +
-                    "2. 控制台 - 应用管理 - 创建应用\n" +
-                    "3. 添加 Key，服务平台选 Web服务\n" +
-                    "4. 复制 Key 粘贴到下方")
-            .setView(input)
-            .setPositiveButton("保存") { _, _ ->
-                val key = input.text.toString().trim()
-                if (key.isNotEmpty()) {
-                    amapKey = key
-                    prefs.edit().putString("amap_key", key).apply()
-                    Toast.makeText(this, "Key 已保存", Toast.LENGTH_SHORT).show()
-                }
-            }
-            .setNegativeButton("跳过", null)
-            .show()
-    }
-
-    private fun goToMyLocation() {
-        if (!hasPermissions()) {
-            requestPermissions()
-            return
-        }
-        try {
-            val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                ?: locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-            if (location != null) {
-                val point = GeoPoint(location.latitude, location.longitude)
-                binding.mapView.controller.animateTo(point)
-                binding.mapView.controller.setZoom(17.0)
-                searchMarker?.let { binding.mapView.overlays.remove(it) }
-                searchMarker = Marker(binding.mapView).apply {
-                    position = point
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
-                    title = "我的位置"
-                    icon = ContextCompat.getDrawable(this@MainActivity, android.R.drawable.presence_online)
-                }
-                binding.mapView.overlays.add(searchMarker)
-                binding.mapView.invalidate()
-                Toast.makeText(this, "已定位到当前位置", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "无法获取当前位置，请检查定位权限", Toast.LENGTH_SHORT).show()
-            }
-        } catch (e: SecurityException) {
-            requestPermissions()
-        }
-    }
-
-    private fun toggleMapLayer() {
-        currentLayerIndex = (currentLayerIndex + 1) % tileLayers.size
-        val (name, source) = tileLayers[currentLayerIndex]
-        binding.mapView.setTileSource(source)
-        binding.mapView.invalidate()
-        Toast.makeText(this, "地图: $name", Toast.LENGTH_SHORT).show()
-    }
+    // ==================== 模拟位置 ====================
 
     /**
-     * v1.9 修复：用实际注册 test provider 来检测模拟位置权限
+     * 用实际注册 test provider 来检测模拟位置权限
      * 比读取 Settings.Secure 更可靠（部分手机返回值格式不标准）
      */
     private fun isMockLocationAllowed(): Boolean {
         return try {
             val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
             val provider = LocationManager.GPS_PROVIDER
-            // 先清理可能存在的旧 provider
             try { lm.removeTestProvider(provider) } catch (_: Exception) {}
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -595,7 +668,6 @@ class MainActivity : AppCompatActivity() {
                     android.location.Criteria.POWER_MEDIUM, android.location.Criteria.ACCURACY_FINE)
             }
 
-            // 注册成功后清理
             try { lm.removeTestProvider(provider) } catch (_: Exception) {}
             Log.d("MockCheck", "isMockLocationAllowed: true")
             true
@@ -604,13 +676,19 @@ class MainActivity : AppCompatActivity() {
             false
         } catch (e: Exception) {
             Log.d("MockCheck", "isMockLocationAllowed error: ${e.javaClass.simpleName}: ${e.message}")
-            // 非 SecurityException 的错误不阻止（可能是其他原因）
             true
         }
     }
 
+    /** 检查飞行模式是否开启 */
+    private fun isAirplaneModeOn(): Boolean {
+        return try {
+            Settings.Global.getInt(contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1
+        } catch (_: Exception) { false }
+    }
+
     private fun startMocking() {
-        // v1.9: 用实际注册 test provider 检测，替代 Settings.Secure 读取
+        // 第1步：检查模拟位置权限
         if (!isMockLocationAllowed()) {
             AlertDialog.Builder(this)
                 .setTitle("请先设置模拟位置应用")
@@ -633,29 +711,61 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // 检查 WiFi
+        // 第2步：检查飞行模式（比WiFi更彻底，关基站+WiFi）
         val wifiManager = getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
-        if (wifiManager.isWifiEnabled) {
+        val wifiOn = wifiManager.isWifiEnabled
+        val airplaneOn = isAirplaneModeOn()
+
+        if (!airplaneOn) {
+            // 飞行模式未开，强烈建议开启
+            val msg = if (wifiOn) {
+                "检测到WiFi开启且飞行模式关闭。\n\n" +
+                "钉钉等APP会通过WiFi扫描+基站定位获取真实位置，\n" +
+                "即使模拟了GPS也能识别真实地址！\n\n" +
+                "最有效的方法：\n" +
+                "1. 开启飞行模式（关闭所有无线信号）\n" +
+                "2. 单独打开移动数据（不打开WiFi）\n" +
+                "3. 然后开始模拟\n\n" +
+                "这样钉钉只能用GPS定位，模拟才能生效。"
+            } else {
+                "飞行模式未开启。\n\n" +
+                "钉钉等APP会通过基站定位获取真实位置，\n" +
+                "即使WiFi已关闭，基站仍能定位！\n\n" +
+                "建议：\n" +
+                "1. 开启飞行模式（关闭所有无线信号）\n" +
+                "2. 单独打开移动数据\n" +
+                "3. 然后开始模拟"
+            }
+
             AlertDialog.Builder(this)
-                .setTitle("请先关闭WiFi")
-                .setMessage(
-                    "检测到WiFi开启。\n" +
-                    "钉钉、高德等APP会通过WiFi扫描获取真实位置，\n" +
-                    "即使模拟了GPS也能识别真实地址。\n\n" +
-                    "请关闭WiFi后点击「已关闭，开始模拟」。"
-                )
-                .setPositiveButton("已关闭，开始模拟") { _, _ ->
+                .setTitle("建议开启飞行模式")
+                .setMessage(msg)
+                .setPositiveButton("已开启，开始模拟") { _, _ ->
                     doStartMockService()
                 }
-                .setNegativeButton("取消", null)
+                .setNeutralButton("去设置飞行模式") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS))
+                }
+                .setNegativeButton("不管，直接模拟") { _, _ ->
+                    doStartMockService()
+                }
                 .setCancelable(false)
                 .show()
         } else {
+            // 飞行模式已开，直接模拟
             doStartMockService()
         }
     }
 
     private fun doStartMockService() {
+        // 保存当前选择的位置到历史和偏好
+        val locationName = binding.tvLocationName.text.toString()
+        saveToHistory(selectedLat, selectedLng, locationName)
+        prefs.edit()
+            .putFloat("last_lat", selectedLat.toFloat())
+            .putFloat("last_lng", selectedLng.toFloat())
+            .apply()
+
         val intent = Intent(this, MockLocationService::class.java).apply {
             putExtra(MockLocationService.EXTRA_LAT, selectedLat)
             putExtra(MockLocationService.EXTRA_LNG, selectedLng)
@@ -690,9 +800,8 @@ class MainActivity : AppCompatActivity() {
                     showMockErrorDialog(msg)
                     stopMocking()
                 } else {
-                    val mockApp = status.mockLocationApp
                     val detail = registered.joinToString("+")
-                    Log.d("MockCheck", "Providers OK: $detail, mockApp=$mockApp")
+                    Log.d("MockCheck", "Providers OK: $detail")
 
                     var verifyOk = false
                     try {
@@ -763,19 +872,23 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v5", false)) return
-        prefs.edit().putBoolean("mock_tips_v5", true).apply()
+        if (prefs.getBoolean("mock_tips_v6", false)) return
+        prefs.edit().putBoolean("mock_tips_v6", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动")
+            .setTitle("模拟已启动 - 重要提示")
             .setMessage(
-                "使用提示：\n\n" +
-                "1. 必须关闭WiFi\n" +
-                "   钉钉等APP通过WiFi扫描获取真实位置。\n\n" +
-                "2. 关闭目标APP后重新打开\n" +
-                "   已运行的APP缓存了旧位置。\n\n" +
-                "3. 保持本APP在后台运行\n" +
+                "让钉钉等APP识别模拟位置的关键步骤：\n\n" +
+                "1. 开启飞行模式\n" +
+                "   飞行模式会关闭WiFi和基站，\n" +
+                "   这样APP只能用GPS定位。\n\n" +
+                "2. 飞行模式下单独开移动数据\n" +
+                "   保证钉钉能联网但不走WiFi/基站。\n\n" +
+                "3. 关闭钉钉后重新打开\n" +
+                "   已运行的APP缓存了旧位置，\n" +
+                "   必须完全关闭后重新打开。\n\n" +
+                "4. 保持本APP在后台运行\n" +
                 "   不要从最近任务中划掉。\n\n" +
-                "4. 打开目标APP后等待几秒\n" +
+                "5. 打开目标APP后等待3-5秒\n" +
                 "   新位置需要时间传播。"
             )
             .setPositiveButton("我知道了", null)
@@ -820,7 +933,7 @@ class MainActivity : AppCompatActivity() {
             if (s.wifiEnabled) {
                 binding.tvWifiStatus.text = "WiFi开启! 目标APP可能检测到真实位置"
             } else {
-                binding.tvWifiStatus.text = "WiFi: 已关闭"
+                binding.tvWifiStatus.text = if (isAirplaneModeOn()) "飞行模式: 已开启" else "WiFi: 已关闭"
             }
         }
     }
@@ -849,6 +962,47 @@ class MainActivity : AppCompatActivity() {
                 startMocking()
             }
         }
+    }
+
+    // ==================== 辅助功能 ====================
+
+    private fun goToMyLocation() {
+        if (!hasPermissions()) {
+            requestPermissions()
+            return
+        }
+        try {
+            val locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val location = locationManager.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+                ?: locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+            if (location != null) {
+                val point = GeoPoint(location.latitude, location.longitude)
+                binding.mapView.controller.animateTo(point)
+                binding.mapView.controller.setZoom(17.0)
+                searchMarker?.let { binding.mapView.overlays.remove(it) }
+                searchMarker = Marker(binding.mapView).apply {
+                    position = point
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
+                    title = "我的位置"
+                    icon = ContextCompat.getDrawable(this@MainActivity, android.R.drawable.presence_online)
+                }
+                binding.mapView.overlays.add(searchMarker)
+                binding.mapView.invalidate()
+                Toast.makeText(this, "已定位到当前位置", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "无法获取当前位置，请检查定位权限", Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: SecurityException) {
+            requestPermissions()
+        }
+    }
+
+    private fun toggleMapLayer() {
+        currentLayerIndex = (currentLayerIndex + 1) % tileLayers.size
+        val (name, source) = tileLayers[currentLayerIndex]
+        binding.mapView.setTileSource(source)
+        binding.mapView.invalidate()
+        Toast.makeText(this, "地图: $name", Toast.LENGTH_SHORT).show()
     }
 
     private fun hasPermissions(): Boolean {
@@ -897,10 +1051,6 @@ class MainActivity : AppCompatActivity() {
     data class SearchResult(val name: String, val lat: Double, val lng: Double)
 
     companion object {
-        /**
-         * 创建 CartoDB 瓦片源（中国可用，WGS-84 坐标系）
-         * 比 OpenStreetMap 官方瓦片在国内加载更快更稳定
-         */
         private fun createCartoDBTileSource(): XYTileSource {
             return XYTileSource(
                 "CartoDBVoyager",

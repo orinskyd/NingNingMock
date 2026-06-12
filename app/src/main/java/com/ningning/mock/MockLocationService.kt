@@ -35,7 +35,7 @@ class MockLocationService : Service() {
         private set
 
     private val handler = Handler(Looper.getMainLooper())
-    private val pushInterval = 500L
+    private val pushInterval = 300L
     private val pushRunnable = object : Runnable {
         override fun run() {
             pushLocation()
