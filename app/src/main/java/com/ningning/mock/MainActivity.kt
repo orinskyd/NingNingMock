@@ -55,6 +55,9 @@ class MainActivity : AppCompatActivity() {
     private var selectedLng = 0.0
     private var searchMarker: Marker? = null
 
+    // 当前模拟位置名称（用于显示）
+    private var currentMockLocationName = ""
+
     private val handler = Handler(Looper.getMainLooper())
     private var statusRunnable: Runnable? = null
 
@@ -64,8 +67,9 @@ class MainActivity : AppCompatActivity() {
     )
     private val PERMISSION_REQUEST = 1001
 
-    // 瓦片图层列表：中国可用优先
+    // 瓦片图层：CartoDB(WGS-84) + 高德(GCJ-02) + OSM(WGS-84)
     private val tileLayers = arrayOf(
+        "高德地图" to createAmapTileSource(),
         "CartoDB" to createCartoDBTileSource(),
         "OpenStreetMap" to TileSourceFactory.MAPNIK
     )
@@ -90,13 +94,16 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "NingNingMock/1.10"
+            userAgentValue = "NingNingMock/1.12"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+
+        // 标题显示版本号
+        binding.tvTitle.text = "宁宁模拟 v1.12"
 
         setupMap()
         setupButtons()
@@ -106,6 +113,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupMap() {
         binding.mapView.apply {
+            // 默认使用高德地图（GCJ-02），与中国APP坐标系一致
             setTileSource(tileLayers[0].second)
             setMultiTouchControls(true)
             controller.setZoom(14.0)
@@ -128,21 +136,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 地图点击选点
+     * 注意：当前图层可能是高德(GCJ-02)或CartoDB(WGS-84)
+     * 高德图层：点击坐标是GCJ-02，需转换为WGS-84存储
+     * CartoDB/OSM图层：点击坐标是WGS-84，直接存储
+     */
     private fun onMapClick(point: GeoPoint) {
         if (isMocking) {
             Toast.makeText(this, "请先停止模拟再选点", Toast.LENGTH_SHORT).show()
             return
         }
 
-        selectedLat = point.latitude
-        selectedLng = point.longitude
+        // 判断当前图层是否为高德（GCJ-02）
+        val isGcj02Map = currentLayerIndex == 0  // 0=高德地图
+        if (isGcj02Map) {
+            // 高德地图点击得到GCJ-02坐标，转WGS-84
+            val (wgsLat, wgsLng) = LocationHooks.gcj02ToWgs84(point.latitude, point.longitude)
+            selectedLat = wgsLat
+            selectedLng = wgsLng
+            Log.d("MapClick", "GCJ-02(${point.latitude}, ${point.longitude}) -> WGS-84($wgsLat, $wgsLng)")
+        } else {
+            selectedLat = point.latitude
+            selectedLng = point.longitude
+        }
 
         currentMarker?.let { binding.mapView.overlays.remove(it) }
         currentMarker = Marker(binding.mapView).apply {
-            position = point
+            position = point  // 使用原始坐标（与当前图层一致）
             setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
             title = "已选择位置"
-            snippet = "%.5f, %.5f".format(point.latitude, point.longitude)
+            snippet = "%.5f, %.5f".format(selectedLat, selectedLng)
             setOnMarkerClickListener { marker, _ ->
                 marker.showInfoWindow()
                 true
@@ -151,11 +175,11 @@ class MainActivity : AppCompatActivity() {
         binding.mapView.overlays.add(currentMarker)
         binding.mapView.invalidate()
 
-        updateSelectedUI(point.latitude, point.longitude)
+        updateSelectedUI(selectedLat, selectedLng)
     }
 
     private fun updateSelectedUI(lat: Double, lng: Double) {
-        binding.tvCoords.text = "%.6f, %.6f".format(lat, lng)
+        binding.tvCoords.text = "WGS-84: %.6f, %.6f".format(lat, lng)
         binding.cardSelected.visibility = View.VISIBLE
         binding.btnStartMock.isEnabled = true
         reverseGeocode(lat, lng)
@@ -193,10 +217,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 高德逆地理编码：需要传入GCJ-02坐标
+     * 所以先 WGS-84 → GCJ-02
+     */
     private fun reverseGeocodeAmap(lat: Double, lng: Double): String? {
         return try {
+            val (gcjLat, gcjLng) = LocationHooks.wgs84ToGcj02(lat, lng)
             val url = "https://restapi.amap.com/v3/geocode/regeo" +
-                    "?key=$amapKey&location=$lng,$lat&extensions=base&output=json"
+                    "?key=$amapKey&location=$gcjLng,$gcjLat&extensions=base&output=json"
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
@@ -245,7 +274,6 @@ class MainActivity : AppCompatActivity() {
     private fun saveToHistory(lat: Double, lng: Double, name: String) {
         try {
             val history = loadHistory().toMutableList()
-            // 去重：如果同一位置（0.001度内）已存在则更新
             val existingIdx = history.indexOfFirst {
                 kotlin.math.abs(it.lat - lat) < 0.001 && kotlin.math.abs(it.lng - lng) < 0.001
             }
@@ -253,7 +281,6 @@ class MainActivity : AppCompatActivity() {
                 history.removeAt(existingIdx)
             }
             history.add(0, HistoryItem(name, lat, lng, System.currentTimeMillis()))
-            // 最多保留 20 条
             while (history.size > 20) {
                 history.removeAt(history.size - 1)
             }
@@ -310,13 +337,23 @@ class MainActivity : AppCompatActivity() {
             .setTitle("定位历史 (${history.size}条)")
             .setItems(items) { _, which ->
                 val h = history[which]
-                val point = GeoPoint(h.lat, h.lng)
+                // 历史记录存的是WGS-84，需要在当前图层上正确显示
+                val isGcj02Map = currentLayerIndex == 0
+                val displayLat: Double
+                val displayLng: Double
+                if (isGcj02Map) {
+                    val (gcjLat, gcjLng) = LocationHooks.wgs84ToGcj02(h.lat, h.lng)
+                    displayLat = gcjLat
+                    displayLng = gcjLng
+                } else {
+                    displayLat = h.lat
+                    displayLng = h.lng
+                }
 
-                // 跳转地图
+                val point = GeoPoint(displayLat, displayLng)
                 binding.mapView.controller.animateTo(point)
                 binding.mapView.controller.setZoom(17.0)
 
-                // 设置选点
                 selectedLat = h.lat
                 selectedLng = h.lng
 
@@ -357,7 +394,21 @@ class MainActivity : AppCompatActivity() {
         if (lastLat != 0.0 && lastLng != 0.0) {
             selectedLat = lastLat
             selectedLng = lastLng
-            val point = GeoPoint(lastLat, lastLng)
+
+            // 根据当前图层决定显示坐标
+            val isGcj02Map = currentLayerIndex == 0
+            val displayLat: Double
+            val displayLng: Double
+            if (isGcj02Map) {
+                val (gcjLat, gcjLng) = LocationHooks.wgs84ToGcj02(lastLat, lastLng)
+                displayLat = gcjLat
+                displayLng = gcjLng
+            } else {
+                displayLat = lastLat
+                displayLng = lastLng
+            }
+
+            val point = GeoPoint(displayLat, displayLng)
             binding.mapView.controller.setCenter(point)
 
             currentMarker = Marker(binding.mapView).apply {
@@ -386,15 +437,15 @@ class MainActivity : AppCompatActivity() {
                 var results: List<SearchResult>? = null
                 var errorMsg = ""
 
-                // 1. 先试 Android Geocoder
+                // 1. 先试 Android Geocoder（返回WGS-84坐标）
                 results = searchViaGeocoder(query)
                 if (results != null && results.isNotEmpty()) {
                     Log.d("Search", "Geocoder found ${results.size} results")
                 } else {
-                    Log.d("Search", "Geocoder returned empty: ${results?.size ?: "null"}")
+                    Log.d("Search", "Geocoder returned empty")
                     errorMsg = "系统搜索无结果。"
 
-                    // 2. 试高德 POI 搜索
+                    // 2. 试高德 POI 搜索（返回GCJ-02坐标）
                     try {
                         val encodedQuery = URLEncoder.encode(query, "UTF-8")
                         results = searchViaAmap(encodedQuery)
@@ -409,7 +460,6 @@ class MainActivity : AppCompatActivity() {
                             if (results != null && results.isNotEmpty()) {
                                 Log.d("Search", "Amap Geocode found ${results.size} results")
                             } else {
-                                Log.d("Search", "Amap Geocode returned empty")
                                 errorMsg += " 地理编码也无结果。"
                             }
                         }
@@ -449,10 +499,7 @@ class MainActivity : AppCompatActivity() {
         return try {
             val geocoder = Geocoder(this, Locale.CHINA)
             val addresses = geocoder.getFromLocationName(query, 10) ?: emptyList()
-            if (addresses.isEmpty()) {
-                Log.d("Search", "Geocoder returned 0 addresses")
-                return null
-            }
+            if (addresses.isEmpty()) return null
 
             val results = mutableListOf<SearchResult>()
             for (addr in addresses) {
@@ -470,10 +517,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 val displayName = if (name.isNotEmpty()) name.toString() else addr.getAddressLine(0) ?: "未知地点"
 
-                results.add(SearchResult(displayName, lat, lng))
+                // Geocoder返回WGS-84坐标
+                results.add(SearchResult(displayName, lat, lng, isGcj02 = false))
             }
 
-            Log.d("Search", "Geocoder found ${results.size} valid results")
             if (results.isEmpty()) null else results
         } catch (e: Exception) {
             Log.d("Search", "Geocoder error: ${e.javaClass.simpleName}: ${e.message}")
@@ -481,6 +528,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 高德POI搜索：返回GCJ-02坐标
+     * 需要标记isGcj02=true，后续转WGS-84使用
+     */
     private fun searchViaAmap(encodedQuery: String): List<SearchResult>? {
         val result = mutableListOf<SearchResult>()
         try {
@@ -490,7 +541,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.10")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.12")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -499,7 +550,6 @@ class MainActivity : AppCompatActivity() {
             }
 
             val body = conn.inputStream.bufferedReader().readText()
-            Log.d("Search", "Amap POI response length: ${body.length}")
 
             if (body.contains("\"status\":\"0\"")) {
                 val infoCode = extractJsonStr(body, "\"infocode\":\"") ?: "unknown"
@@ -507,14 +557,10 @@ class MainActivity : AppCompatActivity() {
                 return null
             }
 
-            if (!body.contains("\"pois\"")) {
-                Log.e("Search", "Amap no pois field")
-                return null
-            }
+            if (!body.contains("\"pois\"")) return null
 
             val poisSection = body.substring(body.indexOf("\"pois\":"))
             val pois = poisSection.split("{\"id\":\"")
-            Log.d("Search", "Found ${pois.size - 1} POIs from Amap")
 
             for (i in 1 until pois.size) {
                 val poi = pois[i]
@@ -528,11 +574,11 @@ class MainActivity : AppCompatActivity() {
                     val city = extractJsonStr(poi, "\"cityname\":\"") ?: ""
                     val adname = extractJsonStr(poi, "\"adname\":\"") ?: ""
                     val fullName = if (address.isNotEmpty()) "$name ($adname$address)" else "$name ($city$adname)"
-                    result.add(SearchResult(fullName, lat, lng))
+                    // 高德返回GCJ-02坐标
+                    result.add(SearchResult(fullName, lat, lng, isGcj02 = true))
                 }
             }
         } catch (e: java.net.SocketTimeoutException) {
-            Log.e("Search", "Amap timeout")
             return null
         } catch (e: Exception) {
             Log.e("Search", "Amap error: ${e.javaClass.simpleName} ${e.message}")
@@ -541,6 +587,9 @@ class MainActivity : AppCompatActivity() {
         return if (result.isEmpty()) null else result
     }
 
+    /**
+     * 高德地理编码：返回GCJ-02坐标
+     */
     private fun searchViaAmapGeocode(encodedQuery: String): List<SearchResult>? {
         return try {
             val url = "https://restapi.amap.com/v3/geocode/geo" +
@@ -548,12 +597,10 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.10")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.12")
             val body = conn.inputStream.bufferedReader().readText()
-            Log.d("Search", "Amap geocode response: ${body.length} chars")
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
-                Log.e("Search", "Amap geocode failed: ${body.substring(0, minOf(200, body.length))}")
                 return null
             }
 
@@ -573,13 +620,13 @@ class MainActivity : AppCompatActivity() {
                     val lng = parts[0].toDoubleOrNull() ?: continue
                     val lat = parts[1].toDoubleOrNull() ?: continue
                     val name = "$addr ($province$city$district)"
-                    results.add(SearchResult(name, lat, lng))
+                    // 高德返回GCJ-02坐标
+                    results.add(SearchResult(name, lat, lng, isGcj02 = true))
                 }
             }
 
             if (results.isEmpty()) null else results
         } catch (e: Exception) {
-            Log.e("Search", "Amap geocode error: ${e.message}")
             null
         }
     }
@@ -596,27 +643,55 @@ class MainActivity : AppCompatActivity() {
         return json.substring(start, end).replace("\\/", "/").replace("\\\\", "")
     }
 
+    /**
+     * 显示搜索结果
+     * 关键：高德(GCJ-02)结果需转WGS-84存储，地图显示按当前图层转换
+     */
     private fun showSearchResults(results: List<SearchResult>) {
         val names = results.mapIndexed { i, r ->
-            "${i + 1}. ${r.name}"
+            val coordTag = if (r.isGcj02) "[高德]" else "[GPS]"
+            "${i + 1}. ${r.name} $coordTag"
         }.toTypedArray()
 
         AlertDialog.Builder(this)
             .setTitle("搜索结果 (${results.size}条)")
             .setItems(names) { _, which ->
                 val r = results[which]
-                val targetPoint = GeoPoint(r.lat, r.lng)
 
+                // 统一转为WGS-84存储
+                if (r.isGcj02) {
+                    val (wgsLat, wgsLng) = LocationHooks.gcj02ToWgs84(r.lat, r.lng)
+                    selectedLat = wgsLat
+                    selectedLng = wgsLng
+                    Log.d("Search", "GCJ-02(${r.lat}, ${r.lng}) -> WGS-84($wgsLat, $wgsLng)")
+                } else {
+                    selectedLat = r.lat
+                    selectedLng = r.lng
+                }
+
+                // 根据当前图层决定显示坐标
+                val isGcj02Map = currentLayerIndex == 0
+                val displayLat: Double
+                val displayLng: Double
+                if (isGcj02Map) {
+                    val (gcjLat, gcjLng) = LocationHooks.wgs84ToGcj02(selectedLat, selectedLng)
+                    displayLat = gcjLat
+                    displayLng = gcjLng
+                } else {
+                    displayLat = selectedLat
+                    displayLng = selectedLng
+                }
+
+                val targetPoint = GeoPoint(displayLat, displayLng)
                 binding.mapView.controller.animateTo(targetPoint)
                 binding.mapView.controller.setZoom(17.0)
 
                 searchMarker?.let { binding.mapView.overlays.remove(it) }
-
                 searchMarker = Marker(binding.mapView).apply {
                     position = targetPoint
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     title = r.name
-                    snippet = "%.5f, %.5f".format(r.lat, r.lng)
+                    snippet = "%.5f, %.5f".format(selectedLat, selectedLng)
                     setOnMarkerClickListener { marker, _ ->
                         marker.showInfoWindow()
                         true
@@ -624,13 +699,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 binding.mapView.overlays.add(searchMarker)
 
-                selectedLat = r.lat
-                selectedLng = r.lng
-                updateSelectedUI(r.lat, r.lng)
-
+                updateSelectedUI(selectedLat, selectedLng)
                 binding.mapView.invalidate()
-
                 binding.etSearch.setText("")
+
                 Toast.makeText(this, "已定位: ${r.name}", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton("取消", null)
@@ -639,10 +711,6 @@ class MainActivity : AppCompatActivity() {
 
     // ==================== 模拟位置 ====================
 
-    /**
-     * 用实际注册 test provider 来检测模拟位置权限
-     * 比读取 Settings.Secure 更可靠（部分手机返回值格式不标准）
-     */
     private fun isMockLocationAllowed(): Boolean {
         return try {
             val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -669,18 +737,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             try { lm.removeTestProvider(provider) } catch (_: Exception) {}
-            Log.d("MockCheck", "isMockLocationAllowed: true")
             true
         } catch (e: SecurityException) {
-            Log.d("MockCheck", "isMockLocationAllowed: false (SecurityException)")
             false
         } catch (e: Exception) {
-            Log.d("MockCheck", "isMockLocationAllowed error: ${e.javaClass.simpleName}: ${e.message}")
             true
         }
     }
 
-    /** 检查飞行模式是否开启 */
     private fun isAirplaneModeOn(): Boolean {
         return try {
             Settings.Global.getInt(contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1
@@ -688,7 +752,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startMocking() {
-        // 第1步：检查模拟位置权限
         if (!isMockLocationAllowed()) {
             AlertDialog.Builder(this)
                 .setTitle("请先设置模拟位置应用")
@@ -711,49 +774,25 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        // 第2步：检查飞行模式（比WiFi更彻底，关基站+WiFi）
+        // 检查WiFi状态
         val wifiManager = getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
         val wifiOn = wifiManager.isWifiEnabled
-        val airplaneOn = isAirplaneModeOn()
 
-        if (!airplaneOn) {
-            // 未开启飞行模式，提示关闭WiFi和WiFi扫描
-            val msg = if (wifiOn) {
-                "检测到WiFi开启！\n\n" +
-                "钉钉等APP会通过WiFi扫描+基站定位获取真实位置，\n" +
-                "即使模拟了GPS也能识别真实地址！\n\n" +
-                "请按以下步骤操作：\n\n" +
-                "方案A（推荐，部分手机支持）：\n" +
-                "1. 开启飞行模式\n" +
-                "2. 飞行模式下单独打开移动数据\n" +
-                "   （如不能单独开数据，用方案B）\n\n" +
-                "方案B（所有手机通用）：\n" +
-                "1. 关闭WiFi\n" +
-                "2. 关闭WiFi扫描\n" +
-                "   （设置→位置信息→Wi-Fi扫描→关闭）\n" +
-                "3. 保持移动数据开启\n" +
-                "4. 开始模拟\n\n" +
-                "两种方案都能让钉钉只能用GPS定位，模拟才能生效。"
-            } else {
-                "WiFi已关闭，但基站仍能定位！\n\n" +
-                "钉钉等APP会通过基站定位获取真实位置。\n\n" +
-                "请按以下步骤操作：\n\n" +
-                "方案A（推荐，部分手机支持）：\n" +
-                "1. 开启飞行模式\n" +
-                "2. 飞行模式下单独打开移动数据\n" +
-                "   （如不能单独开数据，用方案B）\n\n" +
-                "方案B（所有手机通用）：\n" +
-                "1. 确保WiFi已关闭\n" +
-                "2. 关闭WiFi扫描\n" +
-                "   （设置→位置信息→Wi-Fi扫描→关闭）\n" +
-                "3. 保持移动数据开启\n" +
-                "4. 开始模拟"
-            }
-
+        if (wifiOn) {
             AlertDialog.Builder(this)
-                .setTitle("提升模拟效果")
-                .setMessage(msg)
-                .setPositiveButton("已完成，开始模拟") { _, _ ->
+                .setTitle("建议关闭WiFi")
+                .setMessage(
+                    "检测到WiFi开启！\n\n" +
+                    "钉钉等APP会通过WiFi扫描获取真实位置，\n" +
+                    "即使模拟了GPS也能识别真实地址！\n\n" +
+                    "请关闭WiFi和WiFi扫描：\n" +
+                    "1. 关闭WiFi\n" +
+                    "2. 关闭WiFi扫描\n" +
+                    "   （设置→位置信息→Wi-Fi扫描→关闭）\n\n" +
+                    "v1.12已修正坐标系偏移（GCJ-02），\n" +
+                    "关闭WiFi后定位应更准确。"
+                )
+                .setPositiveButton("已关闭，开始模拟") { _, _ ->
                     doStartMockService()
                 }
                 .setNeutralButton("去WiFi设置") { _, _ ->
@@ -765,23 +804,24 @@ class MainActivity : AppCompatActivity() {
                 .setCancelable(false)
                 .show()
         } else {
-            // 飞行模式已开，直接模拟
             doStartMockService()
         }
     }
 
     private fun doStartMockService() {
-        // 保存当前选择的位置到历史和偏好
         val locationName = binding.tvLocationName.text.toString()
+        currentMockLocationName = locationName
         saveToHistory(selectedLat, selectedLng, locationName)
         prefs.edit()
             .putFloat("last_lat", selectedLat.toFloat())
             .putFloat("last_lng", selectedLng.toFloat())
+            .putString("last_name", locationName)
             .apply()
 
         val intent = Intent(this, MockLocationService::class.java).apply {
             putExtra(MockLocationService.EXTRA_LAT, selectedLat)
             putExtra(MockLocationService.EXTRA_LNG, selectedLng)
+            putExtra(MockLocationService.EXTRA_USE_GCJ02, true)  // 启用GCJ-02坐标修正
         }
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         ContextCompat.startForegroundService(this, intent)
@@ -790,7 +830,6 @@ class MainActivity : AppCompatActivity() {
         updateUIState()
         startStatusUpdates()
 
-        // 等待1.5秒后检查模拟是否成功
         handler.postDelayed({
             if (!serviceBound) {
                 showMockErrorDialog("服务启动失败，请尝试重新打开APP")
@@ -809,44 +848,16 @@ class MainActivity : AppCompatActivity() {
 
                 if (registered.isEmpty()) {
                     val msg = errorMsg ?: "Provider注册失败"
-                    Log.e("MockCheck", "All providers failed: $msg")
                     showMockErrorDialog(msg)
                     stopMocking()
                 } else {
                     val detail = registered.joinToString("+")
-                    Log.d("MockCheck", "Providers OK: $detail")
-
-                    var verifyOk = false
-                    try {
-                        val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-                        if (status.gpsRegistered) {
-                            val loc = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-                            if (loc != null) {
-                                verifyOk = true
-                                Log.d("MockCheck", "GPS verify OK: ${loc.latitude}, ${loc.longitude}")
-                            }
-                        }
-                        if (!verifyOk && status.networkRegistered) {
-                            val loc = lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-                            if (loc != null) {
-                                verifyOk = true
-                                Log.d("MockCheck", "NET verify OK: ${loc.latitude}, ${loc.longitude}")
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e("MockCheck", "Verify error: ${e.message}")
-                    }
-
-                    val verifyMsg = if (verifyOk) "（已验证生效）" else "（验证中...）"
+                    val gcjTag = if (status.useGcj02) "GCJ-02" else "WGS-84"
                     Toast.makeText(this,
-                        "模拟已启动 [$detail] $verifyMsg",
+                        "模拟已启动 [$detail] 坐标:$gcjTag",
                         Toast.LENGTH_LONG).show()
-
                     showMockTips()
                 }
-            } else {
-                Log.e("MockCheck", "Status is null after 1.5s")
-                Toast.makeText(this, "正在初始化模拟...", Toast.LENGTH_SHORT).show()
             }
         }, 1500)
     }
@@ -885,26 +896,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v6", false)) return
-        prefs.edit().putBoolean("mock_tips_v6", true).apply()
+        if (prefs.getBoolean("mock_tips_v7", false)) return
+        prefs.edit().putBoolean("mock_tips_v7", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - 重要提示")
+            .setTitle("模拟已启动 - v1.12 提示")
             .setMessage(
-                "让钉钉等APP识别模拟位置的关键步骤：\n\n" +
-                "1. 关闭WiFi和WiFi扫描\n" +
-                "   设置→位置信息→Wi-Fi扫描→关闭\n" +
-                "   WiFi扫描会暴露真实位置！\n\n" +
-                "2. 或者开启飞行模式\n" +
-                "   飞行模式关闭WiFi和基站，\n" +
-                "   如果手机支持，飞行模式下单独开移动数据。\n" +
-                "   （OPPO/华为等部分手机不支持，用方案1即可）\n\n" +
-                "3. 完全关闭钉钉后重新打开\n" +
-                "   已运行的APP缓存了旧位置，\n" +
-                "   必须从最近任务划掉后重新打开。\n\n" +
-                "4. 保持本APP在后台运行\n" +
-                "   不要从最近任务中划掉。\n\n" +
-                "5. 打开目标APP后等待3-5秒\n" +
-                "   新位置需要时间传播。"
+                "v1.12 已自动修正坐标偏移（GCJ-02）！\n\n" +
+                "坐标说明：\n" +
+                "• 中国APP（钉钉等）使用GCJ-02坐标系\n" +
+                "• 本APP已自动将WGS-84转为GCJ-02推送\n" +
+                "• 搜索和地图点击的位置应该与钉钉一致\n\n" +
+                "如果钉钉仍然偏移：\n" +
+                "1. 确认已关闭WiFi和WiFi扫描\n" +
+                "2. 完全关闭钉钉后重新打开\n" +
+                "3. 等待3-5秒\n\n" +
+                "关于紫星APP：\n" +
+                "紫星使用native hook技术（需root），\n" +
+                "可以在不关WiFi的情况下模拟定位。\n" +
+                "非root方案需要关闭WiFi扫描。"
             )
             .setPositiveButton("我知道了", null)
             .show()
@@ -920,6 +929,7 @@ class MainActivity : AppCompatActivity() {
         isMocking = false
         serviceBound = false
         mockService = null
+        currentMockLocationName = ""
         updateUIState()
         stopStatusUpdates()
     }
@@ -943,12 +953,13 @@ class MainActivity : AppCompatActivity() {
         if (serviceBound && mockService != null) {
             val s = mockService!!.getStatus()
             val detail = buildProviderDetail(s)
-            val pushInfo = "推送: ${s.pushCount}次 [$detail]"
+            val gcjTag = if (s.useGcj02) "GCJ-02" else "WGS-84"
+            val pushInfo = "推送: ${s.pushCount}次 [$detail] 坐标:$gcjTag"
             binding.tvStatus.text = pushInfo
             if (s.wifiEnabled) {
                 binding.tvWifiStatus.text = "WiFi开启! 目标APP可能检测到真实位置"
             } else {
-                binding.tvWifiStatus.text = if (isAirplaneModeOn()) "飞行模式: 已开启 ✓" else "WiFi: 已关闭 ✓"
+                binding.tvWifiStatus.text = "WiFi: 已关闭 ✓"
             }
         }
     }
@@ -960,7 +971,12 @@ class MainActivity : AppCompatActivity() {
             binding.tvStatusBar.text = "模拟中"
             binding.tvStatusBar.setTextColor(getColor(android.R.color.holo_green_dark))
             binding.cardSelected.visibility = View.VISIBLE
-            binding.tvCoords.text = "%.6f, %.6f".format(selectedLat, selectedLng)
+
+            // 显示当前模拟位置（醒目）
+            val coordSys = "GCJ-02已修正"
+            val mockName = currentMockLocationName.ifEmpty { "已选位置" }
+            binding.tvCoords.text = "📍 $mockName\nWGS-84: %.6f, %.6f\n$coordSys".format(selectedLat, selectedLng)
+
             binding.btnStartMock.setOnClickListener { stopMocking() }
         } else {
             binding.btnStartMock.text = "开始模拟"
@@ -1017,7 +1033,11 @@ class MainActivity : AppCompatActivity() {
         val (name, source) = tileLayers[currentLayerIndex]
         binding.mapView.setTileSource(source)
         binding.mapView.invalidate()
-        Toast.makeText(this, "地图: $name", Toast.LENGTH_SHORT).show()
+        val coordNote = when (name) {
+            "高德地图" -> "（GCJ-02，与中国APP坐标一致）"
+            else -> "（WGS-84，GPS标准坐标）"
+        }
+        Toast.makeText(this, "地图: $name $coordNote", Toast.LENGTH_LONG).show()
     }
 
     private fun hasPermissions(): Boolean {
@@ -1063,9 +1083,28 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    data class SearchResult(val name: String, val lat: Double, val lng: Double)
+    /** 搜索结果，标记坐标系统 */
+    data class SearchResult(val name: String, val lat: Double, val lng: Double, val isGcj02: Boolean = false)
 
     companion object {
+        /** 高德地图瓦片源（GCJ-02坐标系，与中国APP一致） */
+        private fun createAmapTileSource(): XYTileSource {
+            return object : XYTileSource("Amap", 0, 19, 256, ".png",
+                arrayOf(
+                    "https://wprd01.is.autonavi.com",
+                    "https://wprd02.is.autonavi.com",
+                    "https://wprd03.is.autonavi.com",
+                    "https://wprd04.is.autonavi.com"
+                )) {
+                override fun getTileURLString(pTile: org.osmdroid.tileprovider.tilesource.Tile): String {
+                    val s = (pTile.x % 4) + 1
+                    return "https://wprd0${s}.is.autonavi.com/appmaptile" +
+                            "?x=${pTile.x}&y=${pTile.y}&z=${pTile.zoomLevel}" +
+                            "&lang=zh_cn&size=1&scl=1&style=7"
+                }
+            }
+        }
+
         private fun createCartoDBTileSource(): XYTileSource {
             return XYTileSource(
                 "CartoDBVoyager",

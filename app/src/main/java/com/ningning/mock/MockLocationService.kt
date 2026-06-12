@@ -25,6 +25,7 @@ class MockLocationService : Service() {
 
     private var currentLat = 0.0
     private var currentLng = 0.0
+    private var useGcj02 = true  // 默认启用GCJ-02坐标修正
     private var pushCount = 0L
     private var gpsRegistered = false
     private var networkRegistered = false
@@ -62,6 +63,7 @@ class MockLocationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val lat = intent?.getDoubleExtra(EXTRA_LAT, 0.0) ?: 0.0
         val lng = intent?.getDoubleExtra(EXTRA_LNG, 0.0) ?: 0.0
+        useGcj02 = intent?.getBooleanExtra(EXTRA_USE_GCJ02, true) ?: true
 
         if (lat != 0.0 && lng != 0.0) {
             currentLat = lat
@@ -88,7 +90,7 @@ class MockLocationService : Service() {
         val fusedOk = tryRegisterExtra(FUSED_PROVIDER)
         val passiveOk = tryRegisterExtra(PASSIVE_PROVIDER)
 
-        Log.d("MockService", "GPS=$gpsOk NET=$netOk FUSED=$fusedOk PASSIVE=$passiveOk")
+        Log.d("MockService", "GPS=$gpsOk NET=$netOk FUSED=$fusedOk PASSIVE=$passiveOk useGcj02=$useGcj02")
 
         if (!gpsOk && !netOk) {
             lastError = lastError ?: "Provider注册失败，请确认已在开发者选项中将宁宁模拟设为模拟位置应用"
@@ -163,7 +165,17 @@ class MockLocationService : Service() {
         if (!isRunning) return
         pushCount++
 
-        val (driftedLat, driftedLng) = LocationHooks.applyDrift(currentLat, currentLng)
+        // 坐标修正：WGS-84 → GCJ-02
+        // 中国APP（钉钉等）内部使用GCJ-02坐标系
+        // 推送GCJ-02坐标，APP读取后直接显示，位置正确
+        val (pushLat, pushLng) = if (useGcj02) {
+            LocationHooks.wgs84ToGcj02(currentLat, currentLng)
+        } else {
+            Pair(currentLat, currentLng)
+        }
+
+        // 添加微小漂移（模拟真实GPS信号波动，2-5米）
+        val (driftedLat, driftedLng) = LocationHooks.applyDrift(pushLat, pushLng)
 
         pushToProvider(GPS_PROVIDER, gpsRegistered, driftedLat, driftedLng)
         pushToProvider(NETWORK_PROVIDER, networkRegistered, driftedLat, driftedLng)
@@ -224,6 +236,7 @@ class MockLocationService : Service() {
             fusedRegistered = fusedRegistered,
             passiveRegistered = passiveRegistered,
             wifiEnabled = wifiController.isWifiEnabled(),
+            useGcj02 = useGcj02,
             mockLocationApp = getMockLocationApp(),
             error = lastError
         )
@@ -249,9 +262,10 @@ class MockLocationService : Service() {
     }
 
     private fun buildNotification(): Notification {
+        val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("位置服务运行中")
-            .setContentText("正在提供位置信息")
+            .setContentTitle("宁宁模拟 v1.12 运行中")
+            .setContentText("坐标: $coordSys | 正在提供位置信息")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -277,9 +291,10 @@ class MockLocationService : Service() {
         if (fusedRegistered) providerInfo += "+FUSED"
         if (passiveRegistered) providerInfo += "+PAS"
 
+        val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("位置服务运行中")
-            .setContentText("已推送 ${pushCount}次 [$providerInfo] " +
+            .setContentTitle("宁宁模拟 v1.12")
+            .setContentText("[$coordSys] ${pushCount}次 [$providerInfo] " +
                     "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
@@ -309,6 +324,7 @@ class MockLocationService : Service() {
         val fusedRegistered: Boolean,
         val passiveRegistered: Boolean,
         val wifiEnabled: Boolean,
+        val useGcj02: Boolean,
         val mockLocationApp: String,
         val error: String? = null
     )
@@ -316,6 +332,7 @@ class MockLocationService : Service() {
     companion object {
         const val EXTRA_LAT = "extra_lat"
         const val EXTRA_LNG = "extra_lng"
+        const val EXTRA_USE_GCJ02 = "extra_use_gcj02"
         private const val CHANNEL_ID = "ningning_location"
         private const val NOTIFICATION_ID = 1001
     }
