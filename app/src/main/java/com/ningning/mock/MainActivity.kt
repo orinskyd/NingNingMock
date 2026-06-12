@@ -717,34 +717,47 @@ class MainActivity : AppCompatActivity() {
         val airplaneOn = isAirplaneModeOn()
 
         if (!airplaneOn) {
-            // 飞行模式未开，强烈建议开启
+            // 未开启飞行模式，提示关闭WiFi和WiFi扫描
             val msg = if (wifiOn) {
-                "检测到WiFi开启且飞行模式关闭。\n\n" +
+                "检测到WiFi开启！\n\n" +
                 "钉钉等APP会通过WiFi扫描+基站定位获取真实位置，\n" +
                 "即使模拟了GPS也能识别真实地址！\n\n" +
-                "最有效的方法：\n" +
-                "1. 开启飞行模式（关闭所有无线信号）\n" +
-                "2. 单独打开移动数据（不打开WiFi）\n" +
-                "3. 然后开始模拟\n\n" +
-                "这样钉钉只能用GPS定位，模拟才能生效。"
+                "请按以下步骤操作：\n\n" +
+                "方案A（推荐，部分手机支持）：\n" +
+                "1. 开启飞行模式\n" +
+                "2. 飞行模式下单独打开移动数据\n" +
+                "   （如不能单独开数据，用方案B）\n\n" +
+                "方案B（所有手机通用）：\n" +
+                "1. 关闭WiFi\n" +
+                "2. 关闭WiFi扫描\n" +
+                "   （设置→位置信息→Wi-Fi扫描→关闭）\n" +
+                "3. 保持移动数据开启\n" +
+                "4. 开始模拟\n\n" +
+                "两种方案都能让钉钉只能用GPS定位，模拟才能生效。"
             } else {
-                "飞行模式未开启。\n\n" +
-                "钉钉等APP会通过基站定位获取真实位置，\n" +
-                "即使WiFi已关闭，基站仍能定位！\n\n" +
-                "建议：\n" +
-                "1. 开启飞行模式（关闭所有无线信号）\n" +
-                "2. 单独打开移动数据\n" +
-                "3. 然后开始模拟"
+                "WiFi已关闭，但基站仍能定位！\n\n" +
+                "钉钉等APP会通过基站定位获取真实位置。\n\n" +
+                "请按以下步骤操作：\n\n" +
+                "方案A（推荐，部分手机支持）：\n" +
+                "1. 开启飞行模式\n" +
+                "2. 飞行模式下单独打开移动数据\n" +
+                "   （如不能单独开数据，用方案B）\n\n" +
+                "方案B（所有手机通用）：\n" +
+                "1. 确保WiFi已关闭\n" +
+                "2. 关闭WiFi扫描\n" +
+                "   （设置→位置信息→Wi-Fi扫描→关闭）\n" +
+                "3. 保持移动数据开启\n" +
+                "4. 开始模拟"
             }
 
             AlertDialog.Builder(this)
-                .setTitle("建议开启飞行模式")
+                .setTitle("提升模拟效果")
                 .setMessage(msg)
-                .setPositiveButton("已开启，开始模拟") { _, _ ->
+                .setPositiveButton("已完成，开始模拟") { _, _ ->
                     doStartMockService()
                 }
-                .setNeutralButton("去设置飞行模式") { _, _ ->
-                    startActivity(Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS))
+                .setNeutralButton("去WiFi设置") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_WIFI_SETTINGS))
                 }
                 .setNegativeButton("不管，直接模拟") { _, _ ->
                     doStartMockService()
@@ -878,14 +891,16 @@ class MainActivity : AppCompatActivity() {
             .setTitle("模拟已启动 - 重要提示")
             .setMessage(
                 "让钉钉等APP识别模拟位置的关键步骤：\n\n" +
-                "1. 开启飞行模式\n" +
-                "   飞行模式会关闭WiFi和基站，\n" +
-                "   这样APP只能用GPS定位。\n\n" +
-                "2. 飞行模式下单独开移动数据\n" +
-                "   保证钉钉能联网但不走WiFi/基站。\n\n" +
-                "3. 关闭钉钉后重新打开\n" +
+                "1. 关闭WiFi和WiFi扫描\n" +
+                "   设置→位置信息→Wi-Fi扫描→关闭\n" +
+                "   WiFi扫描会暴露真实位置！\n\n" +
+                "2. 或者开启飞行模式\n" +
+                "   飞行模式关闭WiFi和基站，\n" +
+                "   如果手机支持，飞行模式下单独开移动数据。\n" +
+                "   （OPPO/华为等部分手机不支持，用方案1即可）\n\n" +
+                "3. 完全关闭钉钉后重新打开\n" +
                 "   已运行的APP缓存了旧位置，\n" +
-                "   必须完全关闭后重新打开。\n\n" +
+                "   必须从最近任务划掉后重新打开。\n\n" +
                 "4. 保持本APP在后台运行\n" +
                 "   不要从最近任务中划掉。\n\n" +
                 "5. 打开目标APP后等待3-5秒\n" +
@@ -933,7 +948,7 @@ class MainActivity : AppCompatActivity() {
             if (s.wifiEnabled) {
                 binding.tvWifiStatus.text = "WiFi开启! 目标APP可能检测到真实位置"
             } else {
-                binding.tvWifiStatus.text = if (isAirplaneModeOn()) "飞行模式: 已开启" else "WiFi: 已关闭"
+                binding.tvWifiStatus.text = if (isAirplaneModeOn()) "飞行模式: 已开启 ✓" else "WiFi: 已关闭 ✓"
             }
         }
     }
