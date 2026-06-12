@@ -33,6 +33,7 @@ import org.osmdroid.events.MapEventsReceiver
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
 import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
+import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.compass.CompassOverlay
@@ -1096,10 +1097,13 @@ class MainActivity : AppCompatActivity() {
                     "https://wprd03.is.autonavi.com",
                     "https://wprd04.is.autonavi.com"
                 )) {
-                override fun getTileURLString(pTile: org.osmdroid.tileprovider.tilesource.Tile): String {
-                    val s = (pTile.x % 4) + 1
+                override fun getTileURLString(pMapTileIndex: Long): String {
+                    val x = MapTileIndex.getX(pMapTileIndex)
+                    val y = MapTileIndex.getY(pMapTileIndex)
+                    val z = MapTileIndex.getZoom(pMapTileIndex)
+                    val s = (x % 4) + 1
                     return "https://wprd0${s}.is.autonavi.com/appmaptile" +
-                            "?x=${pTile.x}&y=${pTile.y}&z=${pTile.zoomLevel}" +
+                            "?x=${x}&y=${y}&z=${z}" +
                             "&lang=zh_cn&size=1&scl=1&style=7"
                 }
             }
