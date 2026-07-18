@@ -30,17 +30,8 @@ jobs:
         with:
           gradle-version: '8.5'
 
-      - name: Build Release APK (R8 minified)
-        run: gradle assembleRelease
-
       - name: Build Debug APK
         run: gradle assembleDebug
-
-      - name: Upload Release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: YiYiMock-v1.17-release
-          path: app/build/outputs/apk/release/YiYiMock-v1.17.apk
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
