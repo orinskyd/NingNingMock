@@ -1,6 +1,9 @@
 package com.ningning.mock
 
 import android.location.Location
+import android.os.Bundle
+import android.os.SystemClock
+import android.os.Build
 import kotlin.math.*
 import kotlin.random.Random
 
@@ -14,6 +17,7 @@ import kotlin.random.Random
 object LocationHooks {
 
     private var fieldIsFromMockProvider: java.lang.reflect.Field? = null
+    private var methodSetIsFromMockProvider: java.lang.reflect.Method? = null
     private var initialized = false
     private var lastLat = 0.0
     private var lastLng = 0.0
@@ -89,29 +93,50 @@ object LocationHooks {
 
     /**
      * 初始化反射：获取 Location.mIsFromMockProvider 字段
+     * Android 12+ 可能改用 setIsFromMockProvider 方法
      */
     fun init() {
         if (initialized) return
         try {
+            // 方法1: 反射字段 mIsFromMockProvider
             fieldIsFromMockProvider = Location::class.java.getDeclaredField("mIsFromMockProvider")
             fieldIsFromMockProvider?.isAccessible = true
-            initialized = true
         } catch (e: Exception) {
-            initialized = false
+            fieldIsFromMockProvider = null
         }
+
+        // 方法2: Android 12+ 可能使用 setIsFromMockProvider 方法
+        try {
+            methodSetIsFromMockProvider = Location::class.java.getDeclaredMethod(
+                "setIsFromMockProvider", Boolean::class.javaPrimitiveType
+            )
+            methodSetIsFromMockProvider?.isAccessible = true
+        } catch (e: Exception) {
+            methodSetIsFromMockProvider = null
+        }
+
+        initialized = true
     }
 
     /**
      * Layer 1: 隐藏模拟标记
+     * 尝试两种方式：反射字段 + 反射方法（Android 12+）
      */
     fun hideMockFlag(location: Location) {
         try {
             fieldIsFromMockProvider?.setBoolean(location, false)
         } catch (_: Exception) {}
+
+        try {
+            methodSetIsFromMockProvider?.invoke(location, false)
+        } catch (_: Exception) {}
     }
 
     /**
      * Layer 2: 构建逼真的Location对象
+     * 关键修复：使用 SystemClock.elapsedRealtimeNanos() 替代 System.nanoTime()
+     * Android系统用 elapsedRealtimeNanos 判断位置的"新旧"，如果用错误的时钟，
+     * 系统会认为模拟位置比真实GPS"更旧"，从而被覆盖。
      */
     fun buildRealisticLocation(provider: String, lat: Double, lng: Double): Location {
         stepCounter++
@@ -137,9 +162,25 @@ object LocationHooks {
                 verticalAccuracyMeters = Random.nextDouble(2.0, 8.0).toFloat()
             }
 
+            // === 核心修复：使用正确的系统时钟 ===
+            // SystemClock.elapsedRealtimeNanos() = 从开机开始计时的纳秒数（含休眠）
+            // System.nanoTime() = 从某个任意时间点开始的纳秒数（时钟基准不同！）
+            // Android Location系统用这个字段判断位置新旧，用错就会被覆盖
             time = System.currentTimeMillis()
-            elapsedRealtimeNanos = System.nanoTime()
+            elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
         }
+
+        // 添加extras：模拟真实GPS的卫星信息
+        try {
+            val extras = Bundle().apply {
+                putInt("satellites", 8 + Random.nextInt(0, 4))  // 8-11颗卫星
+                // Android Q+ 使用的键
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    putInt("noOfSatellites", 8 + Random.nextInt(0, 4))
+                }
+            }
+            loc.extras = extras
+        } catch (_: Exception) {}
 
         hideMockFlag(loc)
         return loc

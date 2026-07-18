@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.location.Criteria
 import android.location.Location
+import android.location.LocationListener
 import android.location.LocationManager
 import android.os.*
 import android.provider.Settings
@@ -36,7 +37,7 @@ class MockLocationService : Service() {
         private set
 
     private val handler = Handler(Looper.getMainLooper())
-    private val pushInterval = 300L
+    private val pushInterval = 100L  // 从300ms降到100ms，更快速覆盖真实GPS
     private val pushRunnable = object : Runnable {
         override fun run() {
             pushLocation()
@@ -45,6 +46,26 @@ class MockLocationService : Service() {
     }
 
     private var isRunning = false
+
+    /**
+     * 真实定位拦截器：监听GPS和Network的真实定位更新
+     * 一旦检测到真实定位，立即推送模拟位置覆盖它
+     * 这是防止"0.5秒后被覆盖"的关键机制
+     */
+    private val realLocationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            // 检测到真实定位更新！立即推送模拟位置覆盖
+            Log.d("MockService", "拦截到真实定位 from ${location.provider}，立即覆盖！")
+            pushLocation()
+            // 再推一次确保覆盖
+            handler.post { pushLocation() }
+        }
+
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+        @Suppress("DEPRECATION")
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+    }
 
     inner class LocalBinder : Binder() {
         fun getService(): MockLocationService = this@MockLocationService
@@ -102,6 +123,27 @@ class MockLocationService : Service() {
 
         isRunning = true
         pushCount = 0
+
+        // Burst push: 启动时快速推送5次，确保模拟位置立即"占住"所有provider
+        for (i in 1..5) {
+            pushLocation()
+        }
+        Log.d("MockService", "Burst push完成（5次），开始持续推送")
+
+        // 注册真实定位监听器：拦截GPS和Network的真实更新
+        try {
+            if (gpsOk) {
+                locationManager.requestLocationUpdates(GPS_PROVIDER, 0L, 0f, realLocationListener, Looper.getMainLooper())
+                Log.d("MockService", "GPS真实定位监听已注册")
+            }
+            if (netOk) {
+                locationManager.requestLocationUpdates(NETWORK_PROVIDER, 0L, 0f, realLocationListener, Looper.getMainLooper())
+                Log.d("MockService", "Network真实定位监听已注册")
+            }
+        } catch (e: SecurityException) {
+            Log.d("MockService", "监听注册失败（权限）: ${e.message}")
+        }
+
         handler.post(pushRunnable)
         return true
     }
@@ -210,6 +252,12 @@ class MockLocationService : Service() {
         isRunning = false
         handler.removeCallbacks(pushRunnable)
 
+        // 注销真实定位监听器
+        try {
+            locationManager.removeUpdates(realLocationListener)
+            Log.d("MockService", "真实定位监听已注销")
+        } catch (_: Exception) {}
+
         try { locationManager.removeTestProvider(GPS_PROVIDER) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(NETWORK_PROVIDER) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(FUSED_PROVIDER) } catch (_: Exception) {}
@@ -264,7 +312,7 @@ class MockLocationService : Service() {
     private fun buildNotification(): Notification {
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.12 运行中")
+            .setContentTitle("宁宁模拟 v1.13 运行中")
             .setContentText("坐标: $coordSys | 正在提供位置信息")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
@@ -293,7 +341,7 @@ class MockLocationService : Service() {
 
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.12")
+            .setContentTitle("宁宁模拟 v1.13")
             .setContentText("[$coordSys] ${pushCount}次 [$providerInfo] " +
                     "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
@@ -306,6 +354,7 @@ class MockLocationService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(pushRunnable)
+        try { locationManager.removeUpdates(realLocationListener) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(GPS_PROVIDER) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(NETWORK_PROVIDER) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(FUSED_PROVIDER) } catch (_: Exception) {}

@@ -95,7 +95,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "NingNingMock/1.12"
+            userAgentValue = "NingNingMock/1.13"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // 标题显示版本号
-        binding.tvTitle.text = "宁宁模拟 v1.12"
+        binding.tvTitle.text = "宁宁模拟 v1.13"
 
         setupMap()
         setupButtons()
@@ -542,7 +542,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.12")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.13")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -598,7 +598,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.12")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.13")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -790,7 +790,7 @@ class MainActivity : AppCompatActivity() {
                     "1. 关闭WiFi\n" +
                     "2. 关闭WiFi扫描\n" +
                     "   （设置→位置信息→Wi-Fi扫描→关闭）\n\n" +
-                    "v1.12已修正坐标系偏移（GCJ-02），\n" +
+                    "v1.13已修正坐标系偏移（GCJ-02），\n" +
                     "关闭WiFi后定位应更准确。"
                 )
                 .setPositiveButton("已关闭，开始模拟") { _, _ ->
@@ -822,7 +822,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, MockLocationService::class.java).apply {
             putExtra(MockLocationService.EXTRA_LAT, selectedLat)
             putExtra(MockLocationService.EXTRA_LNG, selectedLng)
-            putExtra(MockLocationService.EXTRA_USE_GCJ02, true)  // 启用GCJ-02坐标修正
+            putExtra(MockLocationService.EXTRA_USE_GCJ02, true)  // 启用GCJ-02坐标修正 (v1.13)
         }
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         ContextCompat.startForegroundService(this, intent)
@@ -897,23 +897,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v7", false)) return
-        prefs.edit().putBoolean("mock_tips_v7", true).apply()
+        if (prefs.getBoolean("mock_tips_v13", false)) return
+        prefs.edit().putBoolean("mock_tips_v13", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.12 提示")
+            .setTitle("模拟已启动 - v1.13 提示")
             .setMessage(
-                "v1.12 已自动修正坐标偏移（GCJ-02）！\n\n" +
-                "坐标说明：\n" +
-                "• 中国APP（钉钉等）使用GCJ-02坐标系\n" +
-                "• 本APP已自动将WGS-84转为GCJ-02推送\n" +
-                "• 搜索和地图点击的位置应该与钉钉一致\n\n" +
+                "v1.13 核心修复：模拟定位不再被覆盖！\n\n" +
+                "修复内容：\n" +
+                "1. 修复时钟错误（核心Bug）\n" +
+                "   之前用错时钟导致系统认为模拟位置"过时"\n" +
+                "   被真实GPS在0.5秒后覆盖\n\n" +
+                "2. 推送频率 300ms → 100ms\n" +
+                "3. 新增真实定位拦截器\n" +
+                "   检测到真实GPS立即覆盖\n" +
+                "4. 启动时连续推送5次快速占位\n\n" +
                 "如果钉钉仍然偏移：\n" +
                 "1. 确认已关闭WiFi和WiFi扫描\n" +
                 "2. 完全关闭钉钉后重新打开\n" +
-                "3. 等待3-5秒\n\n" +
+                "3. 打开钉钉签到前等2-3秒\n\n" +
                 "关于紫星APP：\n" +
                 "紫星使用native hook技术（需root），\n" +
-                "可以在不关WiFi的情况下模拟定位。\n" +
                 "非root方案需要关闭WiFi扫描。"
             )
             .setPositiveButton("我知道了", null)
