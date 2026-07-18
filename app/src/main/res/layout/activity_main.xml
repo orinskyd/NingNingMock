@@ -186,21 +186,23 @@
         android:paddingTop="8dp"
         android:paddingBottom="12dp">
 
-        <!-- 状态信息 -->
+        <!-- 自动后台开关 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center">
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
 
-            <TextView
-                android:id="@+id/tvStatus"
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switchAutoBackground"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text=""
+                android:text="启动后自动进入后台"
+                android:textSize="13sp"
                 android:textColor="#5F6368"
-                android:textSize="12sp" />
+                android:checked="true" />
 
             <TextView
                 android:id="@+id/tvWifiStatus"
@@ -211,12 +213,22 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
+        <!-- 状态信息 -->
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textColor="#5F6368"
+            android:textSize="12sp"
+            android:layout_marginBottom="2dp" />
+
         <!-- 主按钮 -->
         <Button
             android:id="@+id/btnStartMock"
             android:layout_width="match_parent"
             android:layout_height="52dp"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="6dp"
             android:backgroundTint="#34A853"
             android:enabled="false"
             android:text="开始模拟"

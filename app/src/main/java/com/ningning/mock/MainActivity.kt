@@ -95,7 +95,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "NingNingMock/1.14"
+            userAgentValue = "NingNingMock/1.15"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // 标题显示版本号
-        binding.tvTitle.text = "宁宁模拟 v1.14"
+        binding.tvTitle.text = "宁宁模拟 v1.15"
 
         setupMap()
         setupButtons()
@@ -252,6 +252,15 @@ class MainActivity : AppCompatActivity() {
         binding.fabMyLocation.setOnClickListener { goToMyLocation() }
         binding.fabLayer.setOnClickListener { toggleMapLayer() }
         binding.fabHistory.setOnClickListener { showHistoryDialog() }
+
+        // 自动进入后台开关
+        binding.switchAutoBackground.isChecked = prefs.getBoolean("auto_background", true)
+        binding.switchAutoBackground.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("auto_background", isChecked).apply()
+            if (isChecked) {
+                Toast.makeText(this, "已开启: 启动模拟后自动进入后台", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun setupSearch() {
@@ -542,7 +551,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.14")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.15")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -598,7 +607,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.14")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.15")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -866,7 +875,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("重要：后台保活设置")
                 .setMessage(
-                    "v1.14 新增后台保活机制！\n\n" +
+                    "v1.15 后台保活设置\n\n" +
                     "模拟定位在后台被覆盖的原因：\n" +
                     "Android系统会冻结后台Service的CPU，\n" +
                     "导致位置推送停止，被真实GPS覆盖。\n\n" +
@@ -907,8 +916,8 @@ class MainActivity : AppCompatActivity() {
                     "请关闭WiFi和WiFi扫描：\n" +
                     "1. 关闭WiFi\n" +
                     "2. 关闭WiFi扫描\n" +
-                    "   （设置→位置信息→Wi-Fi扫描→关闭）\n\n" +
-                    "v1.14已修正坐标系偏移（GCJ-02），\n" +
+                    "   (设置-位置信息-Wi-Fi扫描-关闭)\n\n" +
+                    "v1.15已修正坐标系偏移(GCJ-02)，\n" +
                     "关闭WiFi后定位应更准确。"
                 )
                 .setPositiveButton("已关闭，开始模拟") { _, _ ->
@@ -940,7 +949,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, MockLocationService::class.java).apply {
             putExtra(MockLocationService.EXTRA_LAT, selectedLat)
             putExtra(MockLocationService.EXTRA_LNG, selectedLng)
-            putExtra(MockLocationService.EXTRA_USE_GCJ02, true)  // 启用GCJ-02坐标修正 (v1.14)
+            putExtra(MockLocationService.EXTRA_USE_GCJ02, true)
         }
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         ContextCompat.startForegroundService(this, intent)
@@ -948,6 +957,8 @@ class MainActivity : AppCompatActivity() {
         isMocking = true
         updateUIState()
         startStatusUpdates()
+
+        val autoBackground = prefs.getBoolean("auto_background", true)
 
         handler.postDelayed({
             if (!serviceBound) {
@@ -975,7 +986,19 @@ class MainActivity : AppCompatActivity() {
                     Toast.makeText(this,
                         "模拟已启动 [$detail] 坐标:$gcjTag",
                         Toast.LENGTH_LONG).show()
-                    showMockTips()
+
+                    // 自动进入后台
+                    if (autoBackground) {
+                        Toast.makeText(this, "2秒后自动进入后台...", Toast.LENGTH_SHORT).show()
+                        handler.postDelayed({
+                            if (isMocking) {
+                                moveTaskToBack(true)
+                                Log.d("AutoBackground", "App moved to background")
+                            }
+                        }, 2000)
+                    } else {
+                        showMockTips()
+                    }
                 }
             }
         }, 1500)
@@ -1015,49 +1038,61 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v14", false)) return
-        prefs.edit().putBoolean("mock_tips_v14", true).apply()
+        if (prefs.getBoolean("mock_tips_v15", false)) return
+        prefs.edit().putBoolean("mock_tips_v15", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.14 后台保活版")
+            .setTitle("模拟已启动 - v1.15")
             .setMessage(
-                "v1.14 核心改进：后台保活！\n\n" +
-                "之前的问题：\n" +
-                "APP最小化到后台后，系统冻结CPU\n" +
-                "导致位置推送停止，被真实GPS覆盖\n" +
-                "只有第一次最小化时能成功\n\n" +
-                "v1.14 新增保活机制：\n" +
-                "1. WakeLock：防止CPU休眠\n" +
-                "   确保后台推送不被冻结\n" +
-                "2. START_STICKY：系统杀掉后自动重启\n" +
-                "3. onTaskRemoved：划掉任务也自动重启\n" +
-                "4. 电池优化白名单引导\n\n" +
+                "v1.15 核心改进：\n\n" +
+                "1. 后台线程推送\n" +
+                "   所有位置操作移至独立线程\n" +
+                "   不再卡UI，停止按钮秒响应\n\n" +
+                "2. 50ms极速推送\n" +
+                "   推送频率从100ms降至50ms\n" +
+                "   更快覆盖被真实GPS刷新的位置\n\n" +
+                "3. 自动进入后台\n" +
+                "   开关已默认开启\n" +
+                "   启动后2秒自动最小化APP\n" +
+                "   无需手动滑动最小化\n\n" +
+                "4. 重启修复\n" +
+                "   每次启动都完整清理旧状态\n" +
+                "   清除系统位置缓存\n" +
+                "   解决第二次启动失败的问题\n\n" +
+                "5. 真实GPS拦截增强\n" +
+                "   检测到真实GPS时burst push 5次\n" +
+                "   监听器在后台线程处理\n\n" +
                 "使用建议：\n" +
-                "1. 开始模拟后，最小化APP（不要关闭）\n" +
+                "1. 开始模拟后APP会自动进入后台\n" +
                 "2. 等2-3秒再打开钉钉签到\n" +
-                "3. 如果仍失败，尝试在最近任务列表\n" +
-                "   给宁宁模拟加锁（下拉加锁）\n\n" +
-                "关于SIM卡：\n" +
-                "基站定位不受test provider影响，\n" +
-                "如果钉钉读取基站信息交叉验证，\n" +
-                "可能需要开启飞行模式+WiFi。"
+                "3. 停止模拟时按钮会立即响应"
             )
             .setPositiveButton("我知道了", null)
             .show()
     }
 
     private fun stopMocking() {
+        // 先立即更新UI状态，让用户看到响应
+        isMocking = false
+
+        // 调用service停止（同步但快速，推送循环已在后台线程）
         if (serviceBound && mockService != null) {
-            mockService?.stopMocking()
+            try { mockService?.stopMocking() } catch (_: Exception) {}
         }
+
         try { unbindService(serviceConnection) } catch (_: Exception) {}
         val intent = Intent(this, MockLocationService::class.java)
         stopService(intent)
-        isMocking = false
+
         serviceBound = false
         mockService = null
         currentMockLocationName = ""
+
+        // 立即更新UI
         updateUIState()
         stopStatusUpdates()
+
+        // 移除所有pending的handler回调（包括自动后台）
+        handler.removeCallbacksAndMessages(null)
     }
 
     private fun startStatusUpdates() {
