@@ -95,7 +95,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "NingNingMock/1.13"
+            userAgentValue = "NingNingMock/1.14"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // 标题显示版本号
-        binding.tvTitle.text = "宁宁模拟 v1.13"
+        binding.tvTitle.text = "宁宁模拟 v1.14"
 
         setupMap()
         setupButtons()
@@ -542,7 +542,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.13")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.14")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -598,7 +598,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.13")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.14")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -752,6 +752,92 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) { false }
     }
 
+    /**
+     * 检查是否已加入电池优化白名单
+     * 未加入白名单时，Android会在后台冻结Service，导致推送停止
+     */
+    private fun isBatteryOptimizationIgnored(): Boolean {
+        return try {
+            val pm = getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            pm.isIgnoringBatteryOptimizations(packageName)
+        } catch (_: Exception) { false }
+    }
+
+    /**
+     * 请求加入电池优化白名单
+     */
+    private fun requestBatteryOptimizationExemption() {
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = android.net.Uri.parse("package:$packageName")
+            }
+            startActivity(intent)
+        } catch (_: Exception) {
+            // 如果直接请求失败，打开电池优化设置页
+            try {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (_: Exception) {
+                Toast.makeText(this, "请手动在设置中关闭电池优化", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    /**
+     * 检测手机品牌，返回对应的保活设置指引
+     */
+    private fun getBrandSurvivalTips(): String {
+        val brand = android.os.Build.BRAND.lowercase()
+        Log.d("Brand", "Device brand: $brand")
+        return when {
+            brand.contains("huawei") || brand.contains("honor") ->
+                "【华为/荣耀手机】\n" +
+                "1. 设置→应用→应用管理→宁宁模拟\n" +
+                "   →电池→选择\"不受限制\"\n" +
+                "2. 设置→应用→应用启动管理\n" +
+                "   →宁宁模拟→关闭\"自动管理\"\n" +
+                "   →开启全部三个开关\n" +
+                "3. 在最近任务列表中，下拉宁宁模拟加锁"
+
+            brand.contains("xiaomi") || brand.contains("redmi") ->
+                "【小米/红米手机】\n" +
+                "1. 设置→应用设置→应用管理→宁宁模拟\n" +
+                "   →省电策略→选择\"无限制\"\n" +
+                "2. 安全中心→应用管理→权限\n" +
+                "   →宁宁模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，长按宁宁模拟→加锁"
+
+            brand.contains("oppo") || brand.contains("realme") ->
+                "【OPPO/真我手机】\n" +
+                "1. 设置→电池→应用耗电管理→宁宁模拟\n" +
+                "   →允许后台运行\n" +
+                "2. 设置→应用管理→宁宁模拟\n" +
+                "   →自启动→允许自启动\n" +
+                "3. 在最近任务列表中，下拉宁宁模拟加锁"
+
+            brand.contains("vivo") ->
+                "【vivo手机】\n" +
+                "1. 设置→电池→后台耗电管理→宁宁模拟\n" +
+                "   →允许后台高耗电\n" +
+                "2. i管家→应用管理→权限管理\n" +
+                "   →宁宁模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，下拉宁宁模拟加锁"
+
+            brand.contains("samsung") ->
+                "【三星手机】\n" +
+                "1. 设置→应用程序→宁宁模拟→电池\n" +
+                "   →选择\"不受限制\"\n" +
+                "2. 设置→电池和设备维护→自动优化\n" +
+                "   →关闭（或添加宁宁模拟到排除列表）"
+
+            else ->
+                "【通用设置】\n" +
+                "1. 设置→电池→宁宁模拟→不受限制\n" +
+                "2. 设置→应用→宁宁模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，给宁宁模拟加锁\n" +
+                "（不同品牌设置路径可能不同）"
+        }
+    }
+
     private fun startMocking() {
         if (!isMockLocationAllowed()) {
             AlertDialog.Builder(this)
@@ -775,6 +861,38 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // 电池优化白名单检查
+        if (!isBatteryOptimizationIgnored() && !prefs.getBoolean("battery_tips_shown", false)) {
+            AlertDialog.Builder(this)
+                .setTitle("重要：后台保活设置")
+                .setMessage(
+                    "v1.14 新增后台保活机制！\n\n" +
+                    "模拟定位在后台被覆盖的原因：\n" +
+                    "Android系统会冻结后台Service的CPU，\n" +
+                    "导致位置推送停止，被真实GPS覆盖。\n\n" +
+                    "请完成以下设置确保模拟稳定：\n\n" +
+                    getBrandSurvivalTips() + "\n\n" +
+                    "设置完成后点击\"已完成，继续\""
+                )
+                .setPositiveButton("已完成，继续") { _, _ ->
+                    // 申请电池优化白名单
+                    requestBatteryOptimizationExemption()
+                    prefs.edit().putBoolean("battery_tips_shown", true).apply()
+                    // 延迟1秒后继续检查WiFi
+                    handler.postDelayed({ checkWifiAndStart() }, 1000)
+                }
+                .setNegativeButton("稍后设置") { _, _ ->
+                    checkWifiAndStart()
+                }
+                .setCancelable(false)
+                .show()
+            return
+        }
+
+        checkWifiAndStart()
+    }
+
+    private fun checkWifiAndStart() {
         // 检查WiFi状态
         val wifiManager = getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager
         val wifiOn = wifiManager.isWifiEnabled
@@ -790,7 +908,7 @@ class MainActivity : AppCompatActivity() {
                     "1. 关闭WiFi\n" +
                     "2. 关闭WiFi扫描\n" +
                     "   （设置→位置信息→Wi-Fi扫描→关闭）\n\n" +
-                    "v1.13已修正坐标系偏移（GCJ-02），\n" +
+                    "v1.14已修正坐标系偏移（GCJ-02），\n" +
                     "关闭WiFi后定位应更准确。"
                 )
                 .setPositiveButton("已关闭，开始模拟") { _, _ ->
@@ -822,7 +940,7 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(this, MockLocationService::class.java).apply {
             putExtra(MockLocationService.EXTRA_LAT, selectedLat)
             putExtra(MockLocationService.EXTRA_LNG, selectedLng)
-            putExtra(MockLocationService.EXTRA_USE_GCJ02, true)  // 启用GCJ-02坐标修正 (v1.13)
+            putExtra(MockLocationService.EXTRA_USE_GCJ02, true)  // 启用GCJ-02坐标修正 (v1.14)
         }
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         ContextCompat.startForegroundService(this, intent)
@@ -897,27 +1015,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v13", false)) return
-        prefs.edit().putBoolean("mock_tips_v13", true).apply()
+        if (prefs.getBoolean("mock_tips_v14", false)) return
+        prefs.edit().putBoolean("mock_tips_v14", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.13 提示")
+            .setTitle("模拟已启动 - v1.14 后台保活版")
             .setMessage(
-                "v1.13 核心修复：模拟定位不再被覆盖！\n\n" +
-                "修复内容：\n" +
-                "1. 修复时钟错误（核心Bug）\n" +
-                "   之前用错时钟导致系统认为模拟位置过时\n" +
-                "   被真实GPS在0.5秒后覆盖\n\n" +
-                "2. 推送频率 300ms → 100ms\n" +
-                "3. 新增真实定位拦截器\n" +
-                "   检测到真实GPS立即覆盖\n" +
-                "4. 启动时连续推送5次快速占位\n\n" +
-                "如果钉钉仍然偏移：\n" +
-                "1. 确认已关闭WiFi和WiFi扫描\n" +
-                "2. 完全关闭钉钉后重新打开\n" +
-                "3. 打开钉钉签到前等2-3秒\n\n" +
-                "关于紫星APP：\n" +
-                "紫星使用native hook技术（需root），\n" +
-                "非root方案需要关闭WiFi扫描。"
+                "v1.14 核心改进：后台保活！\n\n" +
+                "之前的问题：\n" +
+                "APP最小化到后台后，系统冻结CPU\n" +
+                "导致位置推送停止，被真实GPS覆盖\n" +
+                "只有第一次最小化时能成功\n\n" +
+                "v1.14 新增保活机制：\n" +
+                "1. WakeLock：防止CPU休眠\n" +
+                "   确保后台推送不被冻结\n" +
+                "2. START_STICKY：系统杀掉后自动重启\n" +
+                "3. onTaskRemoved：划掉任务也自动重启\n" +
+                "4. 电池优化白名单引导\n\n" +
+                "使用建议：\n" +
+                "1. 开始模拟后，最小化APP（不要关闭）\n" +
+                "2. 等2-3秒再打开钉钉签到\n" +
+                "3. 如果仍失败，尝试在最近任务列表\n" +
+                "   给宁宁模拟加锁（下拉加锁）\n\n" +
+                "关于SIM卡：\n" +
+                "基站定位不受test provider影响，\n" +
+                "如果钉钉读取基站信息交叉验证，\n" +
+                "可能需要开启飞行模式+WiFi。"
             )
             .setPositiveButton("我知道了", null)
             .show()

@@ -19,6 +19,10 @@ class MockLocationService : Service() {
     private lateinit var locationManager: LocationManager
     private lateinit var wifiController: WifiController
 
+    // WakeLock: 防止CPU休眠导致Handler.postDelayed回调被冻结
+    // 这是后台模拟定位被覆盖的根本原因之一
+    private var wakeLock: PowerManager.WakeLock? = null
+
     private val GPS_PROVIDER = LocationManager.GPS_PROVIDER
     private val NETWORK_PROVIDER = LocationManager.NETWORK_PROVIDER
     private val FUSED_PROVIDER = "fused"
@@ -37,7 +41,7 @@ class MockLocationService : Service() {
         private set
 
     private val handler = Handler(Looper.getMainLooper())
-    private val pushInterval = 100L  // 从300ms降到100ms，更快速覆盖真实GPS
+    private val pushInterval = 100L  // 100ms推送间隔
     private val pushRunnable = object : Runnable {
         override fun run() {
             pushLocation()
@@ -50,14 +54,11 @@ class MockLocationService : Service() {
     /**
      * 真实定位拦截器：监听GPS和Network的真实定位更新
      * 一旦检测到真实定位，立即推送模拟位置覆盖它
-     * 这是防止"0.5秒后被覆盖"的关键机制
      */
     private val realLocationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            // 检测到真实定位更新！立即推送模拟位置覆盖
             Log.d("MockService", "拦截到真实定位 from ${location.provider}，立即覆盖！")
             pushLocation()
-            // 再推一次确保覆盖
             handler.post { pushLocation() }
         }
 
@@ -98,7 +99,61 @@ class MockLocationService : Service() {
         if (!success) {
             showErrorNotification()
         }
-        return START_NOT_STICKY
+
+        // START_STICKY: 系统杀掉Service后会自动重启
+        // 配合 stopWithTask=false 确保APP退出后Service仍存活
+        return START_STICKY
+    }
+
+    /**
+     * 用户从最近任务列表划掉APP时触发
+     * 重新启动Service，确保模拟不被中断
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.d("MockService", "onTaskRemoved - 重新启动Service")
+        val restartIntent = Intent(applicationContext, MockLocationService::class.java).apply {
+            putExtra(EXTRA_LAT, currentLat)
+            putExtra(EXTRA_LNG, currentLng)
+            putExtra(EXTRA_USE_GCJ02, useGcj02)
+        }
+        val pendingIntent = PendingIntent.getService(
+            this, 1, restartIntent,
+            PendingIntent.FLAG_ONE_SHOT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarmManager = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        // 1秒后重启
+        alarmManager.set(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP,
+            SystemClock.elapsedRealtime() + 1000,
+            pendingIntent
+        )
+        super.onTaskRemoved(rootIntent)
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "NingNingMock::LocationPush"
+            )
+            wakeLock?.setReferenceCounted(false)
+            // 永久持有，直到模拟停止
+            wakeLock?.acquire()
+            Log.d("MockService", "WakeLock已获取 - CPU保持唤醒")
+        } catch (e: Exception) {
+            Log.d("MockService", "WakeLock获取失败: ${e.message}")
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+                Log.d("MockService", "WakeLock已释放")
+            }
+        } catch (_: Exception) {}
     }
 
     private fun startMocking(): Boolean {
@@ -121,16 +176,19 @@ class MockLocationService : Service() {
 
         LocationHooks.updateLastPosition(currentLat, currentLng)
 
+        // 获取WakeLock，防止CPU休眠导致推送停止
+        acquireWakeLock()
+
         isRunning = true
         pushCount = 0
 
-        // Burst push: 启动时快速推送5次，确保模拟位置立即"占住"所有provider
+        // Burst push: 启动时快速推送5次
         for (i in 1..5) {
             pushLocation()
         }
         Log.d("MockService", "Burst push完成（5次），开始持续推送")
 
-        // 注册真实定位监听器：拦截GPS和Network的真实更新
+        // 注册真实定位监听器
         try {
             if (gpsOk) {
                 locationManager.requestLocationUpdates(GPS_PROVIDER, 0L, 0f, realLocationListener, Looper.getMainLooper())
@@ -207,16 +265,12 @@ class MockLocationService : Service() {
         if (!isRunning) return
         pushCount++
 
-        // 坐标修正：WGS-84 → GCJ-02
-        // 中国APP（钉钉等）内部使用GCJ-02坐标系
-        // 推送GCJ-02坐标，APP读取后直接显示，位置正确
         val (pushLat, pushLng) = if (useGcj02) {
             LocationHooks.wgs84ToGcj02(currentLat, currentLng)
         } else {
             Pair(currentLat, currentLng)
         }
 
-        // 添加微小漂移（模拟真实GPS信号波动，2-5米）
         val (driftedLat, driftedLng) = LocationHooks.applyDrift(pushLat, pushLng)
 
         pushToProvider(GPS_PROVIDER, gpsRegistered, driftedLat, driftedLng)
@@ -252,7 +306,6 @@ class MockLocationService : Service() {
         isRunning = false
         handler.removeCallbacks(pushRunnable)
 
-        // 注销真实定位监听器
         try {
             locationManager.removeUpdates(realLocationListener)
             Log.d("MockService", "真实定位监听已注销")
@@ -267,6 +320,7 @@ class MockLocationService : Service() {
         fusedRegistered = false
         passiveRegistered = false
 
+        releaseWakeLock()
         wifiController.restoreWifiState()
 
         stopForeground(STOP_FOREGROUND_REMOVE)
@@ -312,7 +366,7 @@ class MockLocationService : Service() {
     private fun buildNotification(): Notification {
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.13 运行中")
+            .setContentTitle("宁宁模拟 v1.14 运行中")
             .setContentText("坐标: $coordSys | 正在提供位置信息")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
@@ -341,7 +395,7 @@ class MockLocationService : Service() {
 
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.13")
+            .setContentTitle("宁宁模拟 v1.14")
             .setContentText("[$coordSys] ${pushCount}次 [$providerInfo] " +
                     "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
@@ -359,6 +413,7 @@ class MockLocationService : Service() {
         try { locationManager.removeTestProvider(NETWORK_PROVIDER) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(FUSED_PROVIDER) } catch (_: Exception) {}
         try { locationManager.removeTestProvider(PASSIVE_PROVIDER) } catch (_: Exception) {}
+        releaseWakeLock()
         wifiController.restoreWifiState()
         super.onDestroy()
     }
