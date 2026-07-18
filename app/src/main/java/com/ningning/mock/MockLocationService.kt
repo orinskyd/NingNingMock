@@ -20,7 +20,7 @@ class MockLocationService : Service() {
     private lateinit var wifiController: WifiController
 
     // === HandlerThread: 所有位置操作在独立线程，不阻塞UI ===
-    private val locationThread = HandlerThread("NingNingLocation", Process.THREAD_PRIORITY_URGENT_DISPLAY)
+    private val locationThread = HandlerThread("YiYiLocation", Process.THREAD_PRIORITY_URGENT_DISPLAY)
     private lateinit var locationHandler: Handler
 
     // WakeLock: 防止CPU休眠导致Handler.postDelayed回调被冻结
@@ -147,7 +147,7 @@ class MockLocationService : Service() {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
-                "NingNingMock::LocationPush"
+                "YiYiMock::LocationPush"
             )
             wakeLock?.setReferenceCounted(false)
             wakeLock?.acquire()
@@ -230,7 +230,7 @@ class MockLocationService : Service() {
         Log.d("MockService", "GPS=$gpsOk NET=$netOk FUSED=$fusedOk PASSIVE=$passiveOk useGcj02=$useGcj02")
 
         if (!gpsOk && !netOk) {
-            lastError = lastError ?: "Provider注册失败,请确认已在开发者选项中将宁宁模拟设为模拟位置应用"
+            lastError = lastError ?: "Provider注册失败,请确认已在开发者选项中将依依模拟设为模拟位置应用"
             wifiController.restoreWifiState()
             return false
         }
@@ -462,7 +462,7 @@ class MockLocationService : Service() {
     private fun buildNotification(): Notification {
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.15 运行中")
+            .setContentTitle("依依模拟 v1.16 运行中")
             .setContentText("坐标: $coordSys | 正在提供位置信息")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
@@ -491,7 +491,7 @@ class MockLocationService : Service() {
 
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.15")
+            .setContentTitle("依依模拟 v1.16")
             .setContentText("[$coordSys] ${pushCount}次 [$providerInfo] " +
                     "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
@@ -541,7 +541,7 @@ class MockLocationService : Service() {
         const val EXTRA_LAT = "extra_lat"
         const val EXTRA_LNG = "extra_lng"
         const val EXTRA_USE_GCJ02 = "extra_use_gcj02"
-        private const val CHANNEL_ID = "ningning_location"
+        private const val CHANNEL_ID = "yiyi_location"
         private const val NOTIFICATION_ID = 1001
     }
 }

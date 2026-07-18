@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Location pin shape -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,28
+            C44,28 36,36 36,46
+            C36,58 54,78 54,78
+            C54,78 72,58 72,46
+            C72,36 64,28 54,28
+            Z" />
+
+    <!-- Inner circle (pin hole) -->
+    <path
+        android:fillColor="#7B1FA2"
+        android:pathData="M54,40
+            C50,40 47,43 47,47
+            C47,51 50,54 54,54
+            C58,54 61,51 61,47
+            C61,43 58,40 54,40
+            Z" />
+</vector>

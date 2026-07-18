@@ -91,11 +91,11 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        prefs = getSharedPreferences("ningning_prefs", Context.MODE_PRIVATE)
+        prefs = getSharedPreferences("yiyi_prefs", Context.MODE_PRIVATE)
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "NingNingMock/1.15"
+            userAgentValue = "YiYiMock/1.16"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         // 标题显示版本号
-        binding.tvTitle.text = "宁宁模拟 v1.15"
+        binding.tvTitle.text = "依依模拟 v1.16"
 
         setupMap()
         setupButtons()
@@ -551,7 +551,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.15")
+            conn.setRequestProperty("User-Agent", "YiYiMock/1.16")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -607,7 +607,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.15")
+            conn.setRequestProperty("User-Agent", "YiYiMock/1.16")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -800,49 +800,49 @@ class MainActivity : AppCompatActivity() {
         return when {
             brand.contains("huawei") || brand.contains("honor") ->
                 "【华为/荣耀手机】\n" +
-                "1. 设置→应用→应用管理→宁宁模拟\n" +
+                "1. 设置→应用→应用管理→依依模拟\n" +
                 "   →电池→选择\"不受限制\"\n" +
                 "2. 设置→应用→应用启动管理\n" +
-                "   →宁宁模拟→关闭\"自动管理\"\n" +
+                "   →依依模拟→关闭\"自动管理\"\n" +
                 "   →开启全部三个开关\n" +
-                "3. 在最近任务列表中，下拉宁宁模拟加锁"
+                "3. 在最近任务列表中，下拉依依模拟加锁"
 
             brand.contains("xiaomi") || brand.contains("redmi") ->
                 "【小米/红米手机】\n" +
-                "1. 设置→应用设置→应用管理→宁宁模拟\n" +
+                "1. 设置→应用设置→应用管理→依依模拟\n" +
                 "   →省电策略→选择\"无限制\"\n" +
                 "2. 安全中心→应用管理→权限\n" +
-                "   →宁宁模拟→自启动→允许\n" +
-                "3. 在最近任务列表中，长按宁宁模拟→加锁"
+                "   →依依模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，长按依依模拟→加锁"
 
             brand.contains("oppo") || brand.contains("realme") ->
                 "【OPPO/真我手机】\n" +
-                "1. 设置→电池→应用耗电管理→宁宁模拟\n" +
+                "1. 设置→电池→应用耗电管理→依依模拟\n" +
                 "   →允许后台运行\n" +
-                "2. 设置→应用管理→宁宁模拟\n" +
+                "2. 设置→应用管理→依依模拟\n" +
                 "   →自启动→允许自启动\n" +
-                "3. 在最近任务列表中，下拉宁宁模拟加锁"
+                "3. 在最近任务列表中，下拉依依模拟加锁"
 
             brand.contains("vivo") ->
                 "【vivo手机】\n" +
-                "1. 设置→电池→后台耗电管理→宁宁模拟\n" +
+                "1. 设置→电池→后台耗电管理→依依模拟\n" +
                 "   →允许后台高耗电\n" +
                 "2. i管家→应用管理→权限管理\n" +
-                "   →宁宁模拟→自启动→允许\n" +
-                "3. 在最近任务列表中，下拉宁宁模拟加锁"
+                "   →依依模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，下拉依依模拟加锁"
 
             brand.contains("samsung") ->
                 "【三星手机】\n" +
-                "1. 设置→应用程序→宁宁模拟→电池\n" +
+                "1. 设置→应用程序→依依模拟→电池\n" +
                 "   →选择\"不受限制\"\n" +
                 "2. 设置→电池和设备维护→自动优化\n" +
-                "   →关闭（或添加宁宁模拟到排除列表）"
+                "   →关闭（或添加依依模拟到排除列表）"
 
             else ->
                 "【通用设置】\n" +
-                "1. 设置→电池→宁宁模拟→不受限制\n" +
-                "2. 设置→应用→宁宁模拟→自启动→允许\n" +
-                "3. 在最近任务列表中，给宁宁模拟加锁\n" +
+                "1. 设置→电池→依依模拟→不受限制\n" +
+                "2. 设置→应用→依依模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，给依依模拟加锁\n" +
                 "（不同品牌设置路径可能不同）"
         }
     }
@@ -858,7 +858,7 @@ class MainActivity : AppCompatActivity() {
                     "2. 找到「开发者选项」\n" +
                     "   （如果没有：设置-关于手机-连续点击「版本号」7次）\n" +
                     "3. 找到「选择模拟位置信息应用」\n" +
-                    "4. 选择「宁宁模拟」\n\n" +
+                    "4. 选择「依依模拟」\n\n" +
                     "设置完成后返回本APP重新操作。"
                 )
                 .setPositiveButton("去开发者选项") { _, _ ->
@@ -875,7 +875,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("重要：后台保活设置")
                 .setMessage(
-                    "v1.15 后台保活设置\n\n" +
+                    "v1.16 后台保活设置\n\n" +
                     "模拟定位在后台被覆盖的原因：\n" +
                     "Android系统会冻结后台Service的CPU，\n" +
                     "导致位置推送停止，被真实GPS覆盖。\n\n" +
@@ -917,7 +917,7 @@ class MainActivity : AppCompatActivity() {
                     "1. 关闭WiFi\n" +
                     "2. 关闭WiFi扫描\n" +
                     "   (设置-位置信息-Wi-Fi扫描-关闭)\n\n" +
-                    "v1.15已修正坐标系偏移(GCJ-02)，\n" +
+                    "v1.16已修正坐标系偏移(GCJ-02)，\n" +
                     "关闭WiFi后定位应更准确。"
                 )
                 .setPositiveButton("已关闭，开始模拟") { _, _ ->
@@ -1020,7 +1020,7 @@ class MainActivity : AppCompatActivity() {
                 "1. 打开 设置 - 系统 - 开发者选项\n" +
                 "   （如果没有：设置 - 关于手机 - 连续点击版本号7次）\n" +
                 "2. 找到「选择模拟位置信息应用」\n" +
-                "3. 选择「宁宁模拟」\n" +
+                "3. 选择「依依模拟」\n" +
                 "4. 返回本APP，重新点击「开始模拟」"
             error.contains("Provider注册异常") ->
                 "Provider注册出错：\n$error\n\n建议重启手机后再试。"
@@ -1038,12 +1038,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v15", false)) return
-        prefs.edit().putBoolean("mock_tips_v15", true).apply()
+        if (prefs.getBoolean("mock_tips_v16", false)) return
+        prefs.edit().putBoolean("mock_tips_v16", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.15")
+            .setTitle("模拟已启动 - v1.16")
             .setMessage(
-                "v1.15 核心改进：\n\n" +
+                "v1.16 核心改进：\n\n" +
                 "1. 后台线程推送\n" +
                 "   所有位置操作移至独立线程\n" +
                 "   不再卡UI，停止按钮秒响应\n\n" +
@@ -1130,7 +1130,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnStartMock.text = "停止模拟"
             binding.btnStartMock.setBackgroundColor(getColor(android.R.color.holo_red_dark))
             binding.tvStatusBar.text = "模拟中"
-            binding.tvStatusBar.setTextColor(getColor(android.R.color.holo_green_dark))
+            binding.tvStatusBar.setTextColor(0xFF9C27B0.toInt())
             binding.cardSelected.visibility = View.VISIBLE
 
             // 显示当前模拟位置（醒目）
@@ -1141,7 +1141,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnStartMock.setOnClickListener { stopMocking() }
         } else {
             binding.btnStartMock.text = "开始模拟"
-            binding.btnStartMock.setBackgroundColor(getColor(android.R.color.holo_green_dark))
+            binding.btnStartMock.setBackgroundColor(0xFF9C27B0.toInt())
             binding.tvStatusBar.text = "就绪"
             binding.tvStatusBar.setTextColor(getColor(android.R.color.darker_gray))
             binding.tvStatus.text = ""
