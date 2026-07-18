@@ -121,13 +121,13 @@
                 app:tint="#7B1FA2"
                 app:fabSize="mini" />
 
-            <!-- 历史记录 -->
+            <!-- 历史记录 / 收藏 -->
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/fabHistory"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:contentDescription="历史记录"
+                android:contentDescription="历史与收藏"
                 android:src="@android:drawable/ic_menu_recent_history"
                 app:backgroundTint="#FFFFFF"
                 app:tint="#7B1FA2"
@@ -152,16 +152,34 @@
             android:orientation="vertical"
             android:padding="16dp">
 
-            <TextView
-                android:id="@+id/tvLocationName"
+            <!-- 位置名 + 收藏按钮 -->
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="已选位置"
-                android:textColor="#202124"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:maxLines="2"
-                android:ellipsize="end" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvLocationName"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="已选位置"
+                    android:textColor="#202124"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:maxLines="2"
+                    android:ellipsize="end" />
+
+                <ImageButton
+                    android:id="@+id/btnFavorite"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:layout_marginStart="8dp"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="收藏"
+                    android:src="@android:drawable/btn_star_big_off" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/tvCoords"

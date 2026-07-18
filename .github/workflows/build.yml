@@ -1,4 +1,4 @@
-name: Build NingNingMock APK
+name: Build YiYiMock APK
 
 on:
   push:
@@ -30,11 +30,20 @@ jobs:
         with:
           gradle-version: '8.5'
 
+      - name: Build Release APK (R8 minified)
+        run: gradle assembleRelease
+
       - name: Build Debug APK
         run: gradle assembleDebug
 
-      - name: Upload APK
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: NingNingMock-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: YiYiMock-v1.17-release
+          path: app/build/outputs/apk/release/YiYiMock-v1.17.apk
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: YiYiMock-v1.17-debug
+          path: app/build/outputs/apk/debug/YiYiMock-v1.17.apk

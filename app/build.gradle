@@ -11,14 +11,17 @@ android {
         applicationId "com.yiyi.mock"
         minSdk 23
         targetSdk 34
-        versionCode 26
-        versionName "1.16"
+        versionCode 27
+        versionName "1.17"
     }
 
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // debug签名，方便CI直接构建可用APK
+            signingConfig signingConfigs.debug
         }
         debug {
             minifyEnabled false
@@ -36,6 +39,14 @@ android {
 
     buildFeatures {
         viewBinding true
+    }
+
+    // 自动重命名APK
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            def version = variant.versionName
+            outputFileName = "YiYiMock-v${version}.apk"
+        }
     }
 }
 

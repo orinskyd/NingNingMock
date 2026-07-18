@@ -9,7 +9,26 @@
 .cxx
 local.properties
 /app/build
+
+# 构建产物
 *.apk
 *.zip
 /artifact_out/
+
+# 历史脚本和备份文件（不提交到仓库）
 /gen_icons.py
+generate_icons.py
+/push_v*.js
+/download_v*.js
+/check_*.js
+/count*.js
+/get_*.js
+/get_artifact.ps1
+/jobs.json
+/runs.json
+/run_status.json
+/artifact_list_v*.json
+/build_log_v*/
+/remote_main.kt
+/remote2.kt
+/v14_main.kt
