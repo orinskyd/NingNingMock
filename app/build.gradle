@@ -8,11 +8,11 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.yiyi.mock"
+        applicationId "com.ningning.mock"
         minSdk 23
         targetSdk 34
-        versionCode 28
-        versionName "1.18"
+        versionCode 29
+        versionName "1.19"
     }
 
     buildTypes {
@@ -45,7 +45,7 @@ android {
     applicationVariants.all { variant ->
         variant.outputs.all {
             def version = variant.versionName
-            outputFileName = "YiYiMock-v${version}.apk"
+            outputFileName = "NingNingMock-v${version}.apk"
         }
     }
 }
