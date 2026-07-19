@@ -51,6 +51,7 @@ class MockLocationService : Service() {
     @Volatile private var currentLng = 0.0
     @Volatile private var useGcj02 = true
     @Volatile private var pushCount = 0L
+    @Volatile private var consecutivePushFailures = 0  // v1.18: 连续推送失败计数
     @Volatile private var gpsRegistered = false
     @Volatile private var networkRegistered = false
     @Volatile private var fusedRegistered = false
@@ -232,6 +233,9 @@ class MockLocationService : Service() {
     private fun startMocking(): Boolean {
         fullCleanup()
 
+        // v1.18: 重置反检测状态
+        LocationHooks.resetMockFlagStatus()
+
         wifiController.disableForMock()
 
         val gpsOk = registerProvider(GPS_PROVIDER)
@@ -253,6 +257,7 @@ class MockLocationService : Service() {
 
         isRunning = true
         pushCount = 0
+        consecutivePushFailures = 0  // v1.18
 
         // Burst push: 启动时快速推送10次
         for (i in 1..10) {
@@ -380,14 +385,26 @@ class MockLocationService : Service() {
         val loc = LocationHooks.buildRealisticLocation(provider, lat, lng)
         try {
             locationManager.setTestProviderLocation(provider, loc)
+            consecutivePushFailures = 0  // v1.18: 成功时重置计数器
         } catch (e: Exception) {
+            consecutivePushFailures++
             if (e is IllegalArgumentException || e is SecurityException) {
                 Log.d("MockService", "Re-registering $provider")
                 if (registerProvider(provider)) {
                     try {
                         locationManager.setTestProviderLocation(provider, loc)
-                    } catch (_: Exception) {}
+                        consecutivePushFailures = 0  // 重新注册后成功
+                    } catch (_: Exception) {
+                        // 重新推送也失败，由下方阈值检测处理
+                    }
                 }
+            }
+            // v1.18: 连续失败超过阈值 → 报错
+            if (consecutivePushFailures >= 20) {
+                lastError = "$provider 推送连续失败${consecutivePushFailures}次，模拟已停止"
+                Log.e("MockService", lastError!!)
+                isRunning = false
+                showErrorNotification()
             }
         }
     }
@@ -438,7 +455,8 @@ class MockLocationService : Service() {
             wifiEnabled = wifiController.isWifiEnabled(),
             useGcj02 = useGcj02,
             mockLocationApp = getMockLocationApp(),
-            error = lastError
+            error = lastError,
+            mockFlagOk = !LocationHooks.hideMockFlagFailed  // v1.18
         )
     }
 
@@ -546,7 +564,8 @@ class MockLocationService : Service() {
         val wifiEnabled: Boolean,
         val useGcj02: Boolean,
         val mockLocationApp: String,
-        val error: String? = null
+        val error: String? = null,
+        val mockFlagOk: Boolean = true  // v1.18: 反检测状态
     )
 
     companion object {
