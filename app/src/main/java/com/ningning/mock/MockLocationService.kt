@@ -20,7 +20,7 @@ class MockLocationService : Service() {
     private lateinit var wifiController: WifiController
 
     // === HandlerThread: 所有位置操作在独立线程，不阻塞UI ===
-    private val locationThread = HandlerThread("YiYiLocation", Process.THREAD_PRIORITY_URGENT_DISPLAY)
+    private val locationThread = HandlerThread("NingNingLocation", Process.THREAD_PRIORITY_URGENT_DISPLAY)
     private lateinit var locationHandler: Handler
 
     // WakeLock: 防止CPU休眠导致Handler.postDelayed回调被冻结
@@ -163,7 +163,7 @@ class MockLocationService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
-    // ==================== WakeLock (v1.17: 带超时 + 自动续期) ====================
+    // ==================== WakeLock (v1.19: 带超时 + 自动续期) ====================
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
@@ -171,10 +171,10 @@ class MockLocationService : Service() {
             val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = powerManager.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
-                "YiYiMock::LocationPush"
+                "NingNingMock::LocationPush"
             )
             wakeLock?.setReferenceCounted(false)
-            // v1.17 修复：带超时防止泄漏，每30分钟自动续期
+            // v1.19 修复：带超时防止泄漏，每30分钟自动续期
             wakeLock?.acquire(WAKELOCK_TIMEOUT_MS)
             locationHandler.postDelayed(wakeLockRenewal, WAKELOCK_RENEWAL_INTERVAL)
             Log.d("MockService", "WakeLock acquired (timeout=${WAKELOCK_TIMEOUT_MS}ms)")
@@ -246,7 +246,7 @@ class MockLocationService : Service() {
         Log.d("MockService", "GPS=$gpsOk NET=$netOk FUSED=$fusedOk PASSIVE=$passiveOk useGcj02=$useGcj02")
 
         if (!gpsOk && !netOk) {
-            lastError = lastError ?: "Provider注册失败,请确认已在开发者选项中将依依模拟设为模拟位置应用"
+            lastError = lastError ?: "Provider注册失败,请确认已在开发者选项中将宁宁模拟设为模拟位置应用"
             wifiController.restoreWifiState()
             return false
         }
@@ -410,7 +410,7 @@ class MockLocationService : Service() {
     }
 
     /**
-     * v1.17 修复：停止模拟 — IPC 调用移到后台线程，UI 不阻塞
+     * v1.19 修复：停止模拟 — IPC 调用移到后台线程，UI 不阻塞
      *
      * 快速操作在主线程执行（设标志位 + 移除回调 + stopForeground）
      * IPC 调用（removeTestProvider x4, removeUpdates）在后台线程执行
@@ -480,7 +480,7 @@ class MockLocationService : Service() {
     }
 
     /**
-     * v1.17: 通知带"停止"操作按钮
+     * v1.19: 通知带"停止"操作按钮
      */
     private fun buildStopPendingIntent(): PendingIntent {
         val intent = Intent(this, MockLocationService::class.java).apply {
@@ -495,7 +495,7 @@ class MockLocationService : Service() {
     private fun buildNotification(): Notification {
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("依依模拟 v1.17 运行中")
+            .setContentTitle("宁宁模拟 v1.19 运行中")
             .setContentText("坐标: $coordSys | 正在提供位置信息")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
@@ -525,7 +525,7 @@ class MockLocationService : Service() {
 
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("依依模拟 v1.17")
+            .setContentTitle("宁宁模拟 v1.19")
             .setContentText("[$coordSys] ${pushCount}次 [$providerInfo] " +
                     "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
@@ -572,11 +572,11 @@ class MockLocationService : Service() {
         const val EXTRA_LAT = "extra_lat"
         const val EXTRA_LNG = "extra_lng"
         const val EXTRA_USE_GCJ02 = "extra_use_gcj02"
-        const val ACTION_STOP = "com.yiyi.mock.STOP"
-        private const val CHANNEL_ID = "yiyi_location"
+        const val ACTION_STOP = "com.ningning.mock.STOP"
+        private const val CHANNEL_ID = "ningning_location"
         private const val NOTIFICATION_ID = 1001
 
-        // v1.17: WakeLock 超时 30 分钟，每 30 分钟自动续期
+        // v1.19: WakeLock 超时 30 分钟，每 30 分钟自动续期
         private const val WAKELOCK_TIMEOUT_MS = 30 * 60 * 1000L
         private const val WAKELOCK_RENEWAL_INTERVAL = 30 * 60 * 1000L
     }
