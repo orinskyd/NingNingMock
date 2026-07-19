@@ -31,6 +31,10 @@ object LocationHooks {
     private var lastLat = 0.0
     private var lastLng = 0.0
     private var altitudeBase = Random.nextDouble(80.0, 250.0)
+
+    // v1.18: 反检测状态追踪 — 供 MockLocationService 检查
+    @Volatile var hideMockFlagFailed = false
+        private set
     private var stepCounter = 0
     private var lastBearing = Random.nextDouble(0.0, 360.0).toFloat()
 
@@ -141,21 +145,27 @@ object LocationHooks {
     /**
      * Layer 1: 隐藏所有模拟标记
      * 尝试全部4种方式，确保兼容所有 Android 版本
+     * v1.18: 返回是否至少有一种方式成功
      */
-    fun hideMockFlag(location: Location) {
+    fun hideMockFlag(location: Location): Boolean {
+        var anySuccess = false
+
         // 1. mIsFromMockProvider 字段
         try {
             fieldIsFromMockProvider?.setBoolean(location, false)
+            anySuccess = true
         } catch (_: Exception) {}
 
         // 2. setIsFromMockProvider 方法
         try {
             methodSetIsFromMockProvider?.invoke(location, false)
+            anySuccess = true
         } catch (_: Exception) {}
 
         // 3. mIsMock 字段 (Android 12+)
         try {
             fieldIsMock?.setBoolean(location, false)
+            anySuccess = true
         } catch (_: Exception) {}
 
         // 4. setIsMock 方法 (如果有)
@@ -165,7 +175,18 @@ object LocationHooks {
             )
             setIsMock.isAccessible = true
             setIsMock.invoke(location, false)
+            anySuccess = true
         } catch (_: Exception) {}
+
+        // v1.18: 追踪反检测状态 — 全部失败时标记
+        if (!anySuccess) hideMockFlagFailed = true
+
+        return anySuccess
+    }
+
+    /** v1.18: 重置反检测状态（每次启动模拟时调用） */
+    fun resetMockFlagStatus() {
+        hideMockFlagFailed = false
     }
 
     /**
