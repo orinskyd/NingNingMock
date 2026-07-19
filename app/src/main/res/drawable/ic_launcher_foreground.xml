@@ -16,7 +16,7 @@
 
     <!-- Inner circle (pin hole) -->
     <path
-        android:fillColor="#7B1FA2"
+        android:fillColor="#1565C0"
         android:pathData="M54,40
             C50,40 47,43 47,47
             C47,51 50,54 54,54
