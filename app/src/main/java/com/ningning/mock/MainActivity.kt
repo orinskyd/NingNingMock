@@ -58,13 +58,13 @@ class MainActivity : AppCompatActivity() {
 
     private var currentMockLocationName = ""
 
-    // === v1.17: 后台线程池（替代裸Thread，避免线程堆积） ===
+    // === v1.19: 后台线程池（替代裸Thread，避免线程堆积） ===
     private val backgroundExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     private val handler = Handler(Looper.getMainLooper())
     private var statusRunnable: Runnable? = null
 
-    // === v1.17: 命名的 Runnable，可精确移除 ===
+    // === v1.19: 命名的 Runnable，可精确移除 ===
     private val autoBackgroundRunnable = Runnable {
         if (isMocking) {
             moveTaskToBack(true)
@@ -120,7 +120,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // === v1.17: 缓存模拟位置权限检查结果 ===
+    // === v1.19: 缓存模拟位置权限检查结果 ===
     @Volatile private var cachedMockPermission: Boolean? = null
 
     private val permissions = arrayOf(
@@ -152,11 +152,11 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        prefs = getSharedPreferences("yiyi_prefs", Context.MODE_PRIVATE)
+        prefs = getSharedPreferences("ningning_prefs", Context.MODE_PRIVATE)
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "YiYiMock/1.17"
+            userAgentValue = "NingNingMock/1.19"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -164,7 +164,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.tvTitle.text = "依依模拟 v1.17"
+        binding.tvTitle.text = "宁宁模拟 v1.19"
 
         setupMap()
         setupButtons()
@@ -234,10 +234,10 @@ class MainActivity : AppCompatActivity() {
         binding.cardSelected.visibility = View.VISIBLE
         binding.btnStartMock.isEnabled = true
 
-        // v1.17: 更新收藏按钮状态
+        // v1.19: 更新收藏按钮状态
         updateFavoriteButton(lat, lng)
 
-        // v1.17: 用 ExecutorService 替代裸 Thread
+        // v1.19: 用 ExecutorService 替代裸 Thread
         backgroundExecutor.execute {
             var name = reverseGeocodeSystem(lat, lng)
             if (name == null) {
@@ -300,7 +300,7 @@ class MainActivity : AppCompatActivity() {
         binding.fabLayer.setOnClickListener { toggleMapLayer() }
         binding.fabHistory.setOnClickListener { showHistoryDialog() }
 
-        // v1.17: 收藏按钮
+        // v1.19: 收藏按钮
         binding.btnFavorite.setOnClickListener {
             toggleFavorite()
         }
@@ -328,7 +328,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ==================== 收藏夹功能 (v1.17 新增) ====================
+    // ==================== 收藏夹功能 (v1.19 新增) ====================
 
     private data class FavoriteItem(val name: String, val lat: Double, val lng: Double)
 
@@ -457,7 +457,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * v1.17: 历史对话框整合收藏夹
+     * v1.19: 历史对话框整合收藏夹
      */
     private fun showHistoryDialog() {
         val favorites = loadFavorites()
@@ -595,7 +595,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnSearch.isEnabled = false
         binding.progressSearch.visibility = View.VISIBLE
 
-        // v1.17: 用 ExecutorService 替代裸 Thread
+        // v1.19: 用 ExecutorService 替代裸 Thread
         backgroundExecutor.execute {
             try {
                 var results: List<SearchResult>? = null
@@ -695,7 +695,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "YiYiMock/1.17")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.19")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -744,7 +744,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "YiYiMock/1.17")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.19")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -851,7 +851,7 @@ class MainActivity : AppCompatActivity() {
     // ==================== 模拟位置 ====================
 
     /**
-     * v1.17 修复冻结：缓存权限检查结果
+     * v1.19 修复冻结：缓存权限检查结果
      * 原先每次点击按钮都做3次IPC（addTestProvider+removeTestProvider x2）
      * 现在只在首次检查，onResume时失效重查
      */
@@ -933,49 +933,49 @@ class MainActivity : AppCompatActivity() {
         return when {
             brand.contains("huawei") || brand.contains("honor") ->
                 "【华为/荣耀手机】\n" +
-                "1. 设置→应用→应用管理→依依模拟\n" +
+                "1. 设置→应用→应用管理→宁宁模拟\n" +
                 "   →电池→选择\"不受限制\"\n" +
                 "2. 设置→应用→应用启动管理\n" +
-                "   →依依模拟→关闭\"自动管理\"\n" +
+                "   →宁宁模拟→关闭\"自动管理\"\n" +
                 "   →开启全部三个开关\n" +
-                "3. 在最近任务列表中，下拉依依模拟加锁"
+                "3. 在最近任务列表中，下拉宁宁模拟加锁"
 
             brand.contains("xiaomi") || brand.contains("redmi") ->
                 "【小米/红米手机】\n" +
-                "1. 设置→应用设置→应用管理→依依模拟\n" +
+                "1. 设置→应用设置→应用管理→宁宁模拟\n" +
                 "   →省电策略→选择\"无限制\"\n" +
                 "2. 安全中心→应用管理→权限\n" +
-                "   →依依模拟→自启动→允许\n" +
-                "3. 在最近任务列表中，长按依依模拟→加锁"
+                "   →宁宁模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，长按宁宁模拟→加锁"
 
             brand.contains("oppo") || brand.contains("realme") ->
                 "【OPPO/真我手机】\n" +
-                "1. 设置→电池→应用耗电管理→依依模拟\n" +
+                "1. 设置→电池→应用耗电管理→宁宁模拟\n" +
                 "   →允许后台运行\n" +
-                "2. 设置→应用管理→依依模拟\n" +
+                "2. 设置→应用管理→宁宁模拟\n" +
                 "   →自启动→允许自启动\n" +
-                "3. 在最近任务列表中，下拉依依模拟加锁"
+                "3. 在最近任务列表中，下拉宁宁模拟加锁"
 
             brand.contains("vivo") ->
                 "【vivo手机】\n" +
-                "1. 设置→电池→后台耗电管理→依依模拟\n" +
+                "1. 设置→电池→后台耗电管理→宁宁模拟\n" +
                 "   →允许后台高耗电\n" +
                 "2. i管家→应用管理→权限管理\n" +
-                "   →依依模拟→自启动→允许\n" +
-                "3. 在最近任务列表中，下拉依依模拟加锁"
+                "   →宁宁模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，下拉宁宁模拟加锁"
 
             brand.contains("samsung") ->
                 "【三星手机】\n" +
-                "1. 设置→应用程序→依依模拟→电池\n" +
+                "1. 设置→应用程序→宁宁模拟→电池\n" +
                 "   →选择\"不受限制\"\n" +
                 "2. 设置→电池和设备维护→自动优化\n" +
-                "   →关闭（或添加依依模拟到排除列表）"
+                "   →关闭（或添加宁宁模拟到排除列表）"
 
             else ->
                 "【通用设置】\n" +
-                "1. 设置→电池→依依模拟→不受限制\n" +
-                "2. 设置→应用→依依模拟→自启动→允许\n" +
-                "3. 在最近任务列表中，给依依模拟加锁\n" +
+                "1. 设置→电池→宁宁模拟→不受限制\n" +
+                "2. 设置→应用→宁宁模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，给宁宁模拟加锁\n" +
                 "（不同品牌设置路径可能不同）"
         }
     }
@@ -991,7 +991,7 @@ class MainActivity : AppCompatActivity() {
                     "2. 找到「开发者选项」\n" +
                     "   （如果没有：设置-关于手机-连续点击「版本号」7次）\n" +
                     "3. 找到「选择模拟位置信息应用」\n" +
-                    "4. 选择「依依模拟」\n\n" +
+                    "4. 选择「宁宁模拟」\n\n" +
                     "设置完成后返回本APP重新操作。"
                 )
                 .setPositiveButton("去开发者选项") { _, _ ->
@@ -1007,7 +1007,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("重要：后台保活设置")
                 .setMessage(
-                    "v1.17 后台保活设置\n\n" +
+                    "v1.19 后台保活设置\n\n" +
                     "模拟定位在后台被覆盖的原因：\n" +
                     "Android系统会冻结后台Service的CPU，\n" +
                     "导致位置推送停止，被真实GPS覆盖。\n\n" +
@@ -1046,7 +1046,7 @@ class MainActivity : AppCompatActivity() {
                     "1. 关闭WiFi\n" +
                     "2. 关闭WiFi扫描\n" +
                     "   (设置-位置信息-Wi-Fi扫描-关闭)\n\n" +
-                    "v1.17已修正坐标系偏移(GCJ-02)，\n" +
+                    "v1.19已修正坐标系偏移(GCJ-02)，\n" +
                     "关闭WiFi后定位应更准确。"
                 )
                 .setPositiveButton("已关闭，开始模拟") { _, _ ->
@@ -1089,7 +1089,7 @@ class MainActivity : AppCompatActivity() {
 
         val autoBackground = prefs.getBoolean("auto_background", true)
 
-        // v1.17: 使用命名 Runnable，可精确移除
+        // v1.19: 使用命名 Runnable，可精确移除
         handler.postDelayed(mockStartCheckRunnable, 1500)
     }
 
@@ -1109,7 +1109,7 @@ class MainActivity : AppCompatActivity() {
                 "1. 打开 设置 - 系统 - 开发者选项\n" +
                 "   （如果没有：设置 - 关于手机 - 连续点击版本号7次）\n" +
                 "2. 找到「选择模拟位置信息应用」\n" +
-                "3. 选择「依依模拟」\n" +
+                "3. 选择「宁宁模拟」\n" +
                 "4. 返回本APP，重新点击「开始模拟」"
             error.contains("Provider注册异常") ->
                 "Provider注册出错：\n$error\n\n建议重启手机后再试。"
@@ -1130,9 +1130,9 @@ class MainActivity : AppCompatActivity() {
         if (prefs.getBoolean("mock_tips_v17", false)) return
         prefs.edit().putBoolean("mock_tips_v17", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.17")
+            .setTitle("模拟已启动 - v1.19")
             .setMessage(
-                "v1.17 核心改进：\n\n" +
+                "v1.19 核心改进：\n\n" +
                 "1. 修复卡顿（关键！）\n" +
                 "   权限检查结果缓存，不再每次IPC\n" +
                 "   停止模拟时IPC移至后台线程\n" +
@@ -1161,7 +1161,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * v1.17 修复冻结：停止模拟
+     * v1.19 修复冻结：停止模拟
      *
      * 关键改动：
      * 1. UI 立即更新（isMocking=false + updateUIState）
@@ -1228,7 +1228,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnStartMock.text = "停止模拟"
             binding.btnStartMock.setBackgroundColor(getColor(android.R.color.holo_red_dark))
             binding.tvStatusBar.text = "模拟中"
-            binding.tvStatusBar.setTextColor(0xFF9C27B0.toInt())
+            binding.tvStatusBar.setTextColor(0xFF1976D2.toInt())
             binding.cardSelected.visibility = View.VISIBLE
 
             val coordSys = "GCJ-02已修正"
@@ -1238,7 +1238,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnStartMock.setOnClickListener { stopMocking() }
         } else {
             binding.btnStartMock.text = "开始模拟"
-            binding.btnStartMock.setBackgroundColor(0xFF9C27B0.toInt())
+            binding.btnStartMock.setBackgroundColor(0xFF1976D2.toInt())
             binding.tvStatusBar.text = "就绪"
             binding.tvStatusBar.setTextColor(getColor(android.R.color.darker_gray))
             binding.tvStatus.text = ""
@@ -1324,7 +1324,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         binding.mapView.onResume()
-        // v1.17: 失效权限缓存（用户可能改了开发者选项）
+        // v1.19: 失效权限缓存（用户可能改了开发者选项）
         cachedMockPermission = null
         if (isMocking) startStatusUpdates()
     }
@@ -1332,7 +1332,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         binding.mapView.onPause()
-        // v1.17: 暂停状态轮询，减少IPC
+        // v1.19: 暂停状态轮询，减少IPC
         stopStatusUpdates()
     }
 
@@ -1343,7 +1343,7 @@ class MainActivity : AppCompatActivity() {
         if (serviceBound) {
             try { unbindService(serviceConnection) } catch (_: Exception) {}
         }
-        // v1.17: 关闭线程池
+        // v1.19: 关闭线程池
         backgroundExecutor.shutdown()
         super.onDestroy()
     }
