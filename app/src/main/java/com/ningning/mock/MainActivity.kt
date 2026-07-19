@@ -79,32 +79,43 @@ class MainActivity : AppCompatActivity() {
             return@Runnable
         }
         val status = mockService?.getStatus()
-        if (status != null) {
-            val registered = mutableListOf<String>()
-            if (status.gpsRegistered) registered.add("GPS")
-            if (status.networkRegistered) registered.add("NET")
-            if (status.fusedRegistered) registered.add("FUSED")
-            if (status.passiveRegistered) registered.add("PASSIVE")
+        // v1.18 修复：status 为 null 时也报错（之前静默跳过）
+        if (status == null) {
+            showMockErrorDialog("服务状态异常，请重启APP后重试")
+            stopMocking()
+            return@Runnable
+        }
+        val registered = mutableListOf<String>()
+        if (status.gpsRegistered) registered.add("GPS")
+        if (status.networkRegistered) registered.add("NET")
+        if (status.fusedRegistered) registered.add("FUSED")
+        if (status.passiveRegistered) registered.add("PASSIVE")
 
-            val errorMsg = status.error
+        val errorMsg = status.error
 
-            if (registered.isEmpty()) {
-                val msg = errorMsg ?: "Provider注册失败"
-                showMockErrorDialog(msg)
-                stopMocking()
-            } else {
-                val detail = registered.joinToString("+")
-                val gcjTag = if (status.useGcj02) "GCJ-02" else "WGS-84"
+        if (registered.isEmpty()) {
+            val msg = errorMsg ?: "Provider注册失败"
+            showMockErrorDialog(msg)
+            stopMocking()
+        } else {
+            val detail = registered.joinToString("+")
+            val gcjTag = if (status.useGcj02) "GCJ-02" else "WGS-84"
+            Toast.makeText(this,
+                "模拟已启动 [$detail] 坐标:$gcjTag",
+                Toast.LENGTH_LONG).show()
+
+            // v1.18: 反检测失败警告
+            if (!status.mockFlagOk) {
                 Toast.makeText(this,
-                    "模拟已启动 [$detail] 坐标:$gcjTag",
+                    "⚠ 反检测失效! 目标APP可能检测到模拟",
                     Toast.LENGTH_LONG).show()
+            }
 
-                if (prefs.getBoolean("auto_background", true)) {
-                    Toast.makeText(this, "2秒后自动进入后台...", Toast.LENGTH_SHORT).show()
-                    handler.postDelayed(autoBackgroundRunnable, 2000)
-                } else {
-                    showMockTips()
-                }
+            if (prefs.getBoolean("auto_background", true)) {
+                Toast.makeText(this, "2秒后自动进入后台...", Toast.LENGTH_SHORT).show()
+                handler.postDelayed(autoBackgroundRunnable, 2000)
+            } else {
+                showMockTips()
             }
         }
     }
@@ -875,9 +886,13 @@ class MainActivity : AppCompatActivity() {
             try { lm.removeTestProvider(provider) } catch (_: Exception) {}
             true
         } catch (e: SecurityException) {
+            Log.w("MockPermission", "SecurityException - 未授予模拟位置权限")
             false
         } catch (e: Exception) {
-            true
+            // v1.18 修复：非 SecurityException 异常（如反射/Android限制）
+            // 之前错误地返回 true，导致静默进入后续流程
+            Log.w("MockPermission", "异常: ${e.javaClass.simpleName}: ${e.message}")
+            false
         }
 
         cachedMockPermission = result
