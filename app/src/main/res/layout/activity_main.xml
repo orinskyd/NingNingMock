@@ -11,7 +11,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="56dp"
-        android:background="#7B1FA2"
+        android:background="#1565C0"
         android:gravity="center_vertical"
         android:orientation="horizontal"
         android:paddingHorizontal="16dp">
@@ -21,7 +21,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="依依模拟"
+            android:text="宁宁模拟"
             android:textColor="#FFFFFF"
             android:textSize="20sp"
             android:textStyle="bold" />
@@ -66,7 +66,7 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="搜索"
             android:src="@android:drawable/ic_menu_search"
-            android:tint="#7B1FA2" />
+            android:tint="#1565C0" />
 
         <ProgressBar
             android:id="@+id/progressSearch"
@@ -107,7 +107,7 @@
                 android:contentDescription="图层"
                 android:src="@android:drawable/ic_menu_mapmode"
                 app:backgroundTint="#FFFFFF"
-                app:tint="#7B1FA2"
+                app:tint="#1565C0"
                 app:fabSize="mini" />
 
             <!-- 我的位置 -->
@@ -118,7 +118,7 @@
                 android:contentDescription="我的位置"
                 android:src="@android:drawable/ic_menu_mylocation"
                 app:backgroundTint="#FFFFFF"
-                app:tint="#7B1FA2"
+                app:tint="#1565C0"
                 app:fabSize="mini" />
 
             <!-- 历史记录 / 收藏 -->
@@ -130,7 +130,7 @@
                 android:contentDescription="历史与收藏"
                 android:src="@android:drawable/ic_menu_recent_history"
                 app:backgroundTint="#FFFFFF"
-                app:tint="#7B1FA2"
+                app:tint="#1565C0"
                 app:fabSize="mini" />
         </LinearLayout>
     </FrameLayout>
@@ -247,7 +247,7 @@
             android:layout_width="match_parent"
             android:layout_height="52dp"
             android:layout_marginTop="6dp"
-            android:backgroundTint="#9C27B0"
+            android:backgroundTint="#1976D2"
             android:enabled="false"
             android:text="开始模拟"
             android:textColor="#FFFFFF"
