@@ -58,13 +58,13 @@ class MainActivity : AppCompatActivity() {
 
     private var currentMockLocationName = ""
 
-    // === v1.19: 后台线程池（替代裸Thread，避免线程堆积） ===
+    // === v1.20: 用 ExecutorService 替代裸 Thread ===
     private val backgroundExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     private val handler = Handler(Looper.getMainLooper())
     private var statusRunnable: Runnable? = null
 
-    // === v1.19: 命名的 Runnable，可精确移除 ===
+    // === v1.20: 命名的 Runnable，可精确移除 ===
     private val autoBackgroundRunnable = Runnable {
         if (isMocking) {
             moveTaskToBack(true)
@@ -120,7 +120,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // === v1.19: 缓存模拟位置权限检查结果 ===
+    // === v1.20: 缓存模拟位置权限检查结果 ===
     @Volatile private var cachedMockPermission: Boolean? = null
 
     private val permissions = arrayOf(
@@ -156,7 +156,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "NingNingMock/1.19"
+            userAgentValue = "NingNingMock/1.20"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -164,7 +164,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.tvTitle.text = "宁宁模拟 v1.19"
+        binding.tvTitle.text = "宁宁模拟 v1.20"
 
         setupMap()
         setupButtons()
@@ -234,10 +234,10 @@ class MainActivity : AppCompatActivity() {
         binding.cardSelected.visibility = View.VISIBLE
         binding.btnStartMock.isEnabled = true
 
-        // v1.19: 更新收藏按钮状态
+        // v1.20: 更新收藏按钮状态
         updateFavoriteButton(lat, lng)
 
-        // v1.19: 用 ExecutorService 替代裸 Thread
+        // v1.20: 用 ExecutorService 替代裸 Thread
         backgroundExecutor.execute {
             var name = reverseGeocodeSystem(lat, lng)
             if (name == null) {
@@ -300,7 +300,7 @@ class MainActivity : AppCompatActivity() {
         binding.fabLayer.setOnClickListener { toggleMapLayer() }
         binding.fabHistory.setOnClickListener { showHistoryDialog() }
 
-        // v1.19: 收藏按钮
+        // v1.20: 收藏按钮
         binding.btnFavorite.setOnClickListener {
             toggleFavorite()
         }
@@ -311,6 +311,22 @@ class MainActivity : AppCompatActivity() {
             if (isChecked) {
                 Toast.makeText(this, "已开启: 启动模拟后自动进入后台", Toast.LENGTH_SHORT).show()
             }
+        }
+
+        // === v1.20: 坐标系推送开关 ===
+        // 默认 WGS-84（正确方式，修复高德/百度600米偏移）
+        // 开启 GCJ-02 推送适用于部分不转坐标的钉钉版本
+        binding.switchGcj02.isChecked = prefs.getBoolean("gcj02_push", false)
+        binding.switchGcj02.setOnCheckedChangeListener { _, isChecked ->
+            prefs.edit().putBoolean("gcj02_push", isChecked).apply()
+            val mode = if (isChecked) "GCJ-02" else "WGS-84"
+            val tip = if (isChecked) {
+                "GCJ-02推送: 适用于部分钉钉版本\n（高德/百度地图可能偏移600米）"
+            } else {
+                "WGS-84推送: 标准GPS坐标\n（高德/百度地图显示正确位置）"
+            }
+            Toast.makeText(this, "推送坐标: $mode\n$tip", Toast.LENGTH_LONG).show()
+            binding.tvCoordMode.text = "推送: $mode"
         }
     }
 
@@ -457,7 +473,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * v1.19: 历史对话框整合收藏夹
+     * v1.20: 历史对话框整合收藏夹
      */
     private fun showHistoryDialog() {
         val favorites = loadFavorites()
@@ -595,7 +611,7 @@ class MainActivity : AppCompatActivity() {
         binding.btnSearch.isEnabled = false
         binding.progressSearch.visibility = View.VISIBLE
 
-        // v1.19: 用 ExecutorService 替代裸 Thread
+        // v1.20: 用 ExecutorService 替代裸 Thread
         backgroundExecutor.execute {
             try {
                 var results: List<SearchResult>? = null
@@ -695,7 +711,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.19")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.20")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -744,7 +760,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.19")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.20")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -851,7 +867,7 @@ class MainActivity : AppCompatActivity() {
     // ==================== 模拟位置 ====================
 
     /**
-     * v1.19 修复冻结：缓存权限检查结果
+     * v1.20 修复冻结：缓存权限检查结果
      * 原先每次点击按钮都做3次IPC（addTestProvider+removeTestProvider x2）
      * 现在只在首次检查，onResume时失效重查
      */
@@ -1007,7 +1023,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("重要：后台保活设置")
                 .setMessage(
-                    "v1.19 后台保活设置\n\n" +
+                    "v1.20 后台保活设置\n\n" +
                     "模拟定位在后台被覆盖的原因：\n" +
                     "Android系统会冻结后台Service的CPU，\n" +
                     "导致位置推送停止，被真实GPS覆盖。\n\n" +
@@ -1046,7 +1062,7 @@ class MainActivity : AppCompatActivity() {
                     "1. 关闭WiFi\n" +
                     "2. 关闭WiFi扫描\n" +
                     "   (设置-位置信息-Wi-Fi扫描-关闭)\n\n" +
-                    "v1.19已修正坐标系偏移(GCJ-02)，\n" +
+                    "v1.20已修正坐标系偏移(WGS-84)，\n" +
                     "关闭WiFi后定位应更准确。"
                 )
                 .setPositiveButton("已关闭，开始模拟") { _, _ ->
@@ -1075,10 +1091,13 @@ class MainActivity : AppCompatActivity() {
             .putString("last_name", locationName)
             .apply()
 
+        // v1.20: 默认推送 WGS-84（修复高德/百度600米偏移）
+        // 用户可通过开关切换为 GCJ-02（部分钉钉版本需要）
+        val useGcj02 = prefs.getBoolean("gcj02_push", false)
         val intent = Intent(this, MockLocationService::class.java).apply {
             putExtra(MockLocationService.EXTRA_LAT, selectedLat)
             putExtra(MockLocationService.EXTRA_LNG, selectedLng)
-            putExtra(MockLocationService.EXTRA_USE_GCJ02, true)
+            putExtra(MockLocationService.EXTRA_USE_GCJ02, useGcj02)
         }
         bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         ContextCompat.startForegroundService(this, intent)
@@ -1089,7 +1108,7 @@ class MainActivity : AppCompatActivity() {
 
         val autoBackground = prefs.getBoolean("auto_background", true)
 
-        // v1.19: 使用命名 Runnable，可精确移除
+        // v1.20: 使用命名 Runnable，可精确移除
         handler.postDelayed(mockStartCheckRunnable, 1500)
     }
 
@@ -1127,41 +1146,36 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v17", false)) return
-        prefs.edit().putBoolean("mock_tips_v17", true).apply()
+        if (prefs.getBoolean("mock_tips_v20", false)) return
+        prefs.edit().putBoolean("mock_tips_v20", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.19")
+            .setTitle("模拟已启动 - v1.20")
             .setMessage(
-                "v1.19 核心改进：\n\n" +
-                "1. 修复卡顿（关键！）\n" +
-                "   权限检查结果缓存，不再每次IPC\n" +
-                "   停止模拟时IPC移至后台线程\n" +
-                "   搜索用线程池替代裸线程\n" +
-                "   停止按钮秒响应\n\n" +
-                "2. 反检测增强\n" +
-                "   新增 isMock() 方法反射隐藏\n" +
-                "   平滑的bearing变化（避免突变）\n" +
-                "   更丰富的卫星数据\n\n" +
-                "3. 后台保活优化\n" +
-                "   WakeLock带30分钟超时+自动续期\n" +
-                "   通知栏新增\"停止\"按钮\n" +
-                "   无需打开APP即可停止\n\n" +
-                "4. 收藏夹功能\n" +
-                "   点击星标收藏常用位置\n" +
-                "   历史记录中查看收藏\n\n" +
-                "5. R8代码混淆\n" +
-                "   Release版启用混淆，防反编译\n\n" +
+                "v1.20 核心改进：\n\n" +
+                "1. 修复坐标偏移600米！\n" +
+                "   默认推送WGS-84坐标（标准GPS）\n" +
+                "   高德/百度地图显示正确位置\n" +
+                "   如钉钉偏移可开启GCJ-02开关\n\n" +
+                "2. GCJ-02推送开关\n" +
+                "   底部新增坐标系统切换\n" +
+                "   WGS-84: 修复高德/百度偏移\n" +
+                "   GCJ-02: 部分钉钉版本需要\n\n" +
+                "3. 反检测增强\n" +
+                "   隐藏isFromMockProvider标记\n" +
+                "   卫星数据+GPS时间戳模拟\n\n" +
                 "使用建议：\n" +
-                "1. 开始模拟后APP会自动进入后台\n" +
-                "2. 等2-3秒再打开钉钉签到\n" +
-                "3. 通知栏可直接点\"停止\"结束模拟"
+                "1. 默认WGS-84模式（高德/百度正确）\n" +
+                "2. 如浙政钉/钉钉不认模拟位置\n" +
+                "   尝试开启GCJ-02推送\n" +
+                "3. 开始模拟后APP自动进入后台\n" +
+                "4. 通知栏可点\"停止\"结束模拟"
             )
             .setPositiveButton("我知道了", null)
             .show()
     }
 
     /**
-     * v1.19 修复冻结：停止模拟
+     * v1.20 修复冻结：停止模拟
      *
      * 关键改动：
      * 1. UI 立即更新（isMocking=false + updateUIState）
@@ -1231,9 +1245,9 @@ class MainActivity : AppCompatActivity() {
             binding.tvStatusBar.setTextColor(0xFF1976D2.toInt())
             binding.cardSelected.visibility = View.VISIBLE
 
-            val coordSys = "GCJ-02已修正"
+            val coordSys = if (prefs.getBoolean("gcj02_push", false)) "GCJ-02" else "WGS-84(标准GPS)"
             val mockName = currentMockLocationName.ifEmpty { "已选位置" }
-            binding.tvCoords.text = "📍 $mockName\nWGS-84: %.6f, %.6f\n$coordSys".format(selectedLat, selectedLng)
+            binding.tvCoords.text = "📍 $mockName\nWGS-84: %.6f, %.6f\n推送: $coordSys".format(selectedLat, selectedLng)
 
             binding.btnStartMock.setOnClickListener { stopMocking() }
         } else {
@@ -1324,7 +1338,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         binding.mapView.onResume()
-        // v1.19: 失效权限缓存（用户可能改了开发者选项）
+        // v1.20: 失效权限缓存（用户可能改了开发者选项）
         cachedMockPermission = null
         if (isMocking) startStatusUpdates()
     }
@@ -1332,7 +1346,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPause() {
         super.onPause()
         binding.mapView.onPause()
-        // v1.19: 暂停状态轮询，减少IPC
+        // v1.20: 暂停状态轮询，减少IPC
         stopStatusUpdates()
     }
 
@@ -1343,7 +1357,7 @@ class MainActivity : AppCompatActivity() {
         if (serviceBound) {
             try { unbindService(serviceConnection) } catch (_: Exception) {}
         }
-        // v1.19: 关闭线程池
+        // v1.20: 关闭线程池
         backgroundExecutor.shutdown()
         super.onDestroy()
     }
