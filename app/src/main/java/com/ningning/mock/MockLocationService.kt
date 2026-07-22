@@ -163,7 +163,7 @@ class MockLocationService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
-    // ==================== WakeLock (v1.19: 带超时 + 自动续期) ====================
+    // ==================== WakeLock (v1.20: 带超时 + 自动续期) ====================
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
@@ -174,7 +174,7 @@ class MockLocationService : Service() {
                 "NingNingMock::LocationPush"
             )
             wakeLock?.setReferenceCounted(false)
-            // v1.19 修复：带超时防止泄漏，每30分钟自动续期
+            // v1.20 修复：带超时防止泄漏，每30分钟自动续期
             wakeLock?.acquire(WAKELOCK_TIMEOUT_MS)
             locationHandler.postDelayed(wakeLockRenewal, WAKELOCK_RENEWAL_INTERVAL)
             Log.d("MockService", "WakeLock acquired (timeout=${WAKELOCK_TIMEOUT_MS}ms)")
@@ -347,8 +347,10 @@ class MockLocationService : Service() {
         pushCount++
 
         val (pushLat, pushLng) = if (useGcj02) {
+            // GCJ-02模式：转换后推送（部分钉钉版本需要）
             LocationHooks.wgs84ToGcj02(currentLat, currentLng)
         } else {
+            // WGS-84模式：直接推送（标准GPS坐标，修复高德/百度600米偏移）
             Pair(currentLat, currentLng)
         }
 
@@ -410,7 +412,7 @@ class MockLocationService : Service() {
     }
 
     /**
-     * v1.19 修复：停止模拟 — IPC 调用移到后台线程，UI 不阻塞
+     * v1.20 修复：停止模拟 — IPC 调用移到后台线程，UI 不阻塞
      *
      * 快速操作在主线程执行（设标志位 + 移除回调 + stopForeground）
      * IPC 调用（removeTestProvider x4, removeUpdates）在后台线程执行
@@ -480,7 +482,7 @@ class MockLocationService : Service() {
     }
 
     /**
-     * v1.19: 通知带"停止"操作按钮
+     * v1.20: 通知带"停止"操作按钮
      */
     private fun buildStopPendingIntent(): PendingIntent {
         val intent = Intent(this, MockLocationService::class.java).apply {
@@ -495,7 +497,7 @@ class MockLocationService : Service() {
     private fun buildNotification(): Notification {
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.19 运行中")
+            .setContentTitle("宁宁模拟 v1.20 运行中")
             .setContentText("坐标: $coordSys | 正在提供位置信息")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
@@ -525,7 +527,7 @@ class MockLocationService : Service() {
 
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.19")
+            .setContentTitle("宁宁模拟 v1.20")
             .setContentText("[$coordSys] ${pushCount}次 [$providerInfo] " +
                     "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
@@ -576,7 +578,7 @@ class MockLocationService : Service() {
         private const val CHANNEL_ID = "ningning_location"
         private const val NOTIFICATION_ID = 1001
 
-        // v1.19: WakeLock 超时 30 分钟，每 30 分钟自动续期
+        // v1.20: WakeLock 超时 30 分钟，每 30 分钟自动续期
         private const val WAKELOCK_TIMEOUT_MS = 30 * 60 * 1000L
         private const val WAKELOCK_RENEWAL_INTERVAL = 30 * 60 * 1000L
     }
