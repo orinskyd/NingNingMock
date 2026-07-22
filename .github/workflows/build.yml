@@ -36,5 +36,5 @@ jobs:
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: NingNingMock-v1.19-debug
-          path: app/build/outputs/apk/debug/NingNingMock-v1.19.apk
+          name: NingNingMock-v1.20-debug
+          path: app/build/outputs/apk/debug/NingNingMock-v1.20.apk
