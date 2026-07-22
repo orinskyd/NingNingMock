@@ -204,13 +204,13 @@
         android:paddingTop="8dp"
         android:paddingBottom="12dp">
 
-        <!-- 自动后台开关 -->
+        <!-- 自动后台开关 + WiFi状态 -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
             android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
+            android:layout_marginBottom="2dp">
 
             <androidx.appcompat.widget.SwitchCompat
                 android:id="@+id/switchAutoBackground"
@@ -229,6 +229,34 @@
                 android:text=""
                 android:textColor="#5F6368"
                 android:textSize="12sp" />
+        </LinearLayout>
+
+        <!-- 坐标系推送开关 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+
+            <androidx.appcompat.widget.SwitchCompat
+                android:id="@+id/switchGcj02"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="GCJ-02推送(钉钉专用)"
+                android:textSize="13sp"
+                android:textColor="#5F6368"
+                android:checked="false" />
+
+            <TextView
+                android:id="@+id/tvCoordMode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="推送: WGS-84"
+                android:textColor="#1565C0"
+                android:textSize="12sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <!-- 状态信息 -->
