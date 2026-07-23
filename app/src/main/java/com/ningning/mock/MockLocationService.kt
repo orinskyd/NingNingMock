@@ -497,7 +497,7 @@ class MockLocationService : Service() {
     private fun buildNotification(): Notification {
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.20 运行中")
+            .setContentTitle("宁宁模拟 v1.21 运行中")
             .setContentText("坐标: $coordSys | 正在提供位置信息")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
@@ -527,7 +527,7 @@ class MockLocationService : Service() {
 
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("宁宁模拟 v1.20")
+            .setContentTitle("宁宁模拟 v1.21")
             .setContentText("[$coordSys] ${pushCount}次 [$providerInfo] " +
                     "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)
