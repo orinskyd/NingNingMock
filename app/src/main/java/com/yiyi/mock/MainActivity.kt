@@ -1332,40 +1332,20 @@ class MainActivity : AppCompatActivity() {
         grantResults: IntArray
     ) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == PERMISSION_REQUEST) {
-            if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-                Toast.makeText(this, "定位权限已获取", Toast.LENGTH_SHORT).show()
+        when (requestCode) {
+            PERMISSION_REQUEST -> {
+                if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
+                    Toast.makeText(this, "定位权限已获取", Toast.LENGTH_SHORT).show()
+                }
             }
-        }
-    }
-
-    // ==================== v1.22: 通知权限请求 ====================
-
-    private fun requestNotificationPermission() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
-                    NOTIFICATION_PERMISSION_REQUEST
-                )
-            }
-        }
-    }
-
-    override fun onRequestPermissionsResult(
-        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
-    ) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
-            val granted = grantResults.isNotEmpty() &&
-                    grantResults[0] == PackageManager.PERMISSION_GRANTED
-            if (granted) {
-                Toast.makeText(this, "通知权限已开启，模拟运行状态将显示在通知栏", Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, "通知权限被拒绝，模拟运行时将不会在通知栏显示状态", Toast.LENGTH_LONG).show()
+            NOTIFICATION_PERMISSION_REQUEST -> {
+                val granted = grantResults.isNotEmpty() &&
+                        grantResults[0] == PackageManager.PERMISSION_GRANTED
+                if (granted) {
+                    Toast.makeText(this, "通知权限已开启，模拟运行状态将显示在通知栏", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "通知权限被拒绝，模拟运行时将不会在通知栏显示状态", Toast.LENGTH_LONG).show()
+                }
             }
         }
     }
