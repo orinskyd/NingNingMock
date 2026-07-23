@@ -61,6 +61,9 @@ class MainActivity : AppCompatActivity() {
     // === v1.20: 用 ExecutorService 替代裸 Thread ===
     private val backgroundExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
+    // v1.21: 通知权限请求码
+    private val NOTIFICATION_PERMISSION_REQUEST = 2001
+
     private val handler = Handler(Looper.getMainLooper())
     private var statusRunnable: Runnable? = null
 
@@ -156,7 +159,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "NingNingMock/1.20"
+            userAgentValue = "NingNingMock/1.21"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -164,7 +167,10 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.tvTitle.text = "宁宁模拟 v1.20"
+        binding.tvTitle.text = "宁宁模拟 v1.21"
+
+        // v1.21: 请求通知权限（Android 13+ 必需，否则通知栏不显示）
+        requestNotificationPermission()
 
         setupMap()
         setupButtons()
@@ -711,7 +717,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.20")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.21")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -760,7 +766,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.20")
+            conn.setRequestProperty("User-Agent", "NingNingMock/1.21")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -1146,29 +1152,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v20", false)) return
-        prefs.edit().putBoolean("mock_tips_v20", true).apply()
+        if (prefs.getBoolean("mock_tips_v21", false)) return
+        prefs.edit().putBoolean("mock_tips_v21", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.20")
+            .setTitle("模拟已启动 - v1.21")
             .setMessage(
-                "v1.20 核心改进：\n\n" +
-                "1. 修复坐标偏移600米！\n" +
-                "   默认推送WGS-84坐标（标准GPS）\n" +
-                "   高德/百度地图显示正确位置\n" +
-                "   如钉钉偏移可开启GCJ-02开关\n\n" +
-                "2. GCJ-02推送开关\n" +
-                "   底部新增坐标系统切换\n" +
-                "   WGS-84: 修复高德/百度偏移\n" +
-                "   GCJ-02: 部分钉钉版本需要\n\n" +
-                "3. 反检测增强\n" +
-                "   隐藏isFromMockProvider标记\n" +
-                "   卫星数据+GPS时间戳模拟\n\n" +
+                "v1.21 核心改进：\n\n" +
+                "1. 修复通知栏不显示！\n" +
+                "   Android 13+ 通知权限申请\n" +
+                "   首次启动会弹出权限请求\n" +
+                "   允许后通知栏显示模拟状态\n\n" +
+                "2. 修复坐标偏移600米\n" +
+                "   默认推送WGS-84坐标\n" +
+                "   高德/百度地图显示正确\n\n" +
+                "3. GCJ-02推送开关\n" +
+                "   底部可切换坐标系统\n\n" +
+                "4. 反检测增强\n" +
+                "   isFromMockProvider隐藏\n" +
+                "   卫星数据+extras伪装\n\n" +
                 "使用建议：\n" +
-                "1. 默认WGS-84模式（高德/百度正确）\n" +
-                "2. 如浙政钉/钉钉不认模拟位置\n" +
-                "   尝试开启GCJ-02推送\n" +
-                "3. 开始模拟后APP自动进入后台\n" +
-                "4. 通知栏可点\"停止\"结束模拟"
+                "1. 首次启动请允许通知权限\n" +
+                "2. 默认WGS-84模式即可\n" +
+                "3. 模拟后APP自动进入后台\n" +
+                "4. 通知栏可点\"停止\"结束"
             )
             .setPositiveButton("我知道了", null)
             .show()
@@ -1331,6 +1337,37 @@ class MainActivity : AppCompatActivity() {
         if (requestCode == PERMISSION_REQUEST) {
             if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
                 Toast.makeText(this, "定位权限已获取", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    // ==================== v1.21: 通知权限请求 ====================
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_PERMISSION_REQUEST
+                )
+            }
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST) {
+            val granted = grantResults.isNotEmpty() &&
+                    grantResults[0] == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                Toast.makeText(this, "通知权限已开启，模拟运行状态将显示在通知栏", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "通知权限被拒绝，模拟运行时将不会在通知栏显示状态", Toast.LENGTH_LONG).show()
             }
         }
     }
