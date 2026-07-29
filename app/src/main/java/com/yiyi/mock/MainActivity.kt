@@ -61,7 +61,7 @@ class MainActivity : AppCompatActivity() {
     // === v1.20: 用 ExecutorService 替代裸 Thread ===
     private val backgroundExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
-    // v1.22: 通知权限请求码
+    // v1.23: 通知权限请求码
     private val NOTIFICATION_PERMISSION_REQUEST = 2001
 
     private val handler = Handler(Looper.getMainLooper())
@@ -159,7 +159,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "YiYiMock/1.22"
+            userAgentValue = "YiYiMock/1.23"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -167,9 +167,9 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.tvTitle.text = "依依模拟 v1.22"
+        binding.tvTitle.text = "依依模拟 v1.23"
 
-        // v1.22: 请求通知权限（Android 13+ 必需，否则通知栏不显示）
+        // v1.23: 请求通知权限（Android 13+ 必需，否则通知栏不显示）
         requestNotificationPermission()
 
         setupMap()
@@ -717,7 +717,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "YiYiMock/1.22")
+            conn.setRequestProperty("User-Agent", "YiYiMock/1.23")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -766,7 +766,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "YiYiMock/1.22")
+            conn.setRequestProperty("User-Agent", "YiYiMock/1.23")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -1003,33 +1003,55 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startMocking() {
-        if (!isMockLocationAllowed()) {
-            AlertDialog.Builder(this)
-                .setTitle("请先设置模拟位置应用")
-                .setMessage(
-                    "模拟位置权限未授予。\n\n" +
-                    "请按以下步骤操作：\n\n" +
-                    "1. 打开「设置」\n" +
-                    "2. 找到「开发者选项」\n" +
-                    "   （如果没有：设置-关于手机-连续点击「版本号」7次）\n" +
-                    "3. 找到「选择模拟位置信息应用」\n" +
-                    "4. 选择「依依模拟」\n\n" +
-                    "设置完成后返回本APP重新操作。"
-                )
-                .setPositiveButton("去开发者选项") { _, _ ->
-                    startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
-                }
-                .setNegativeButton("取消", null)
-                .setCancelable(false)
-                .show()
+        if (selectedLat == 0.0 && selectedLng == 0.0) {
+            Toast.makeText(this, "请先在地图上选择位置", Toast.LENGTH_SHORT).show()
             return
         }
 
+        // v1.23: 将权限检查移到后台线程，防止UI冻结
+        // isMockLocationAllowed()内部做3次IPC调用(addTestProvider/removeTestProvider)
+        // 首次未缓存时可能阻塞UI线程数百毫秒，导致按钮"卡住"
+        binding.btnStartMock.isEnabled = false
+        binding.btnStartMock.text = "检查权限中..."
+
+        backgroundExecutor.execute {
+            val allowed = isMockLocationAllowed()
+            runOnUiThread {
+                binding.btnStartMock.isEnabled = true
+                binding.btnStartMock.text = "开始模拟"
+
+                if (!allowed) {
+                    AlertDialog.Builder(this)
+                        .setTitle("请先设置模拟位置应用")
+                        .setMessage(
+                            "模拟位置权限未授予。\n\n" +
+                            "请按以下步骤操作：\n\n" +
+                            "1. 打开「设置」\n" +
+                            "2. 找到「开发者选项」\n" +
+                            "   （如果没有：设置-关于手机-连续点击「版本号」7次）\n" +
+                            "3. 找到「选择模拟位置信息应用」\n" +
+                            "4. 选择「依依模拟」\n\n" +
+                            "设置完成后返回本APP重新操作。"
+                        )
+                        .setPositiveButton("去开发者选项") { _, _ ->
+                            startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
+                        }
+                        .setNegativeButton("取消", null)
+                        .setCancelable(false)
+                        .show()
+                } else {
+                    checkBatteryAndWifi()
+                }
+            }
+        }
+    }
+
+    private fun checkBatteryAndWifi() {
         if (!isBatteryOptimizationIgnored() && !prefs.getBoolean("battery_tips_shown", false)) {
             AlertDialog.Builder(this)
                 .setTitle("重要：后台保活设置")
                 .setMessage(
-                    "v1.22 后台保活设置\n\n" +
+                    "v1.23 后台保活设置\n\n" +
                     "模拟定位在后台被覆盖的原因：\n" +
                     "Android系统会冻结后台Service的CPU，\n" +
                     "导致位置推送停止，被真实GPS覆盖。\n\n" +
@@ -1068,7 +1090,7 @@ class MainActivity : AppCompatActivity() {
                     "1. 关闭WiFi\n" +
                     "2. 关闭WiFi扫描\n" +
                     "   (设置-位置信息-Wi-Fi扫描-关闭)\n\n" +
-                    "v1.22已修正坐标系偏移(WGS-84)，\n" +
+                    "v1.23已修正坐标系偏移(WGS-84)，\n" +
                     "关闭WiFi后定位应更准确。"
                 )
                 .setPositiveButton("已关闭，开始模拟") { _, _ ->
@@ -1152,24 +1174,28 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v22", false)) return
-        prefs.edit().putBoolean("mock_tips_v22", true).apply()
+        if (prefs.getBoolean("mock_tips_v23", false)) return
+        prefs.edit().putBoolean("mock_tips_v23", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.22")
+            .setTitle("模拟已启动 - v1.23")
             .setMessage(
-                "v1.22 核心改进：\n\n" +
-                "1. 依依模拟品牌回归！\n" +
-                "   紫色主题 + 独立包名\n" +
-                "   与宁宁模拟可共存\n\n" +
-                "2. 修复通知栏不显示\n" +
-                "   通知重要性提升为默认\n" +
-                "   状态栏可显示运行图标\n\n" +
-                "3. WGS-84坐标推送\n" +
-                "   修复高德/百度600米偏移\n\n" +
-                "4. GCJ-02推送开关\n" +
-                "   底部可切换坐标系统\n\n" +
+                "v1.23 核心改进：\n\n" +
+                "1. 修复定位延迟！\n" +
+                "   真实监听器提前注册\n" +
+                "   burst push增强至30次\n" +
+                "   移除导致provider重置的\n" +
+                "   周期性setTestProviderEnabled\n\n" +
+                "2. 修复按钮卡死！\n" +
+                "   权限检查移至后台线程\n" +
+                "   不再阻塞UI\n\n" +
+                "3. 精确坐标stabilization\n" +
+                "   前100次推送不漂移\n" +
+                "   确保模拟位置精确覆盖\n\n" +
+                "4. LastKnownLocation刷新\n" +
+                "   burst后立即刷新缓存\n" +
+                "   签到APP秒读模拟位置\n\n" +
                 "使用建议：\n" +
-                "1. 首次启动请允许通知权限\n" +
+                "1. 模拟后等待2秒再打开签到\n" +
                 "2. 默认WGS-84模式即可\n" +
                 "3. 模拟后APP自动进入后台\n" +
                 "4. 下拉通知栏可点\"停止\"结束"
@@ -1326,7 +1352,7 @@ class MainActivity : AppCompatActivity() {
         ActivityCompat.requestPermissions(this, permissions, PERMISSION_REQUEST)
     }
 
-    // ==================== v1.22: 通知权限请求 ====================
+    // ==================== v1.23: 通知权限请求 ====================
 
     private fun requestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
