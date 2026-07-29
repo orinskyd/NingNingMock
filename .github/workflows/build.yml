@@ -36,5 +36,5 @@ jobs:
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: YiYiMock-v1.23-debug
-          path: app/build/outputs/apk/debug/YiYiMock-v1.23.apk
+          name: YiYiMock-v1.24-debug
+          path: app/build/outputs/apk/debug/YiYiMock-v1.24.apk

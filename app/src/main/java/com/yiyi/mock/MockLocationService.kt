@@ -66,9 +66,9 @@ class MockLocationService : Service() {
     private val pushRunnable = object : Runnable {
         override fun run() {
             if (!isRunning) return
-            // v1.23: Stabilization - 前100次推送使用精确坐标(无漂移)
-            // 确保模拟位置在启动初期精确覆盖真实GPS
-            pushLocation(pushCount >= 100)
+            // v1.24: 前30次推送精确坐标(不漂移)，之后正常漂移
+            // 大幅缩短stabilization避免竞态，同时保持启动精度
+            pushLocation()
             if (isRunning) {
                 locationHandler.postDelayed(this, pushInterval)
             }
@@ -80,14 +80,16 @@ class MockLocationService : Service() {
     /**
      * 真实定位拦截器：监听GPS和Network的真实定位更新
      * 回调在locationHandler线程处理，不影响UI
-     * v1.23: burst push 20次覆盖真实定位
+     * v1.24: burst 10次 + 重新启用provider防止被系统禁用
      */
     private val realLocationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
-            // v1.23: burst 5→20, 使用精确坐标(无漂移)确保覆盖真实定位
-            Log.d("MockService", "Real loc from ${location.provider} - burst push 20x!")
-            for (i in 1..20) {
-                pushLocation(false)
+            Log.d("MockService", "Real loc from ${location.provider} - burst push 10x!")
+            // v1.24: 先重新启用provider，防止被系统禁用后真实GPS侵入
+            try { locationManager.setTestProviderEnabled(GPS_PROVIDER, true) } catch (_: Exception) {}
+            try { locationManager.setTestProviderEnabled(NETWORK_PROVIDER, true) } catch (_: Exception) {}
+            for (i in 1..10) {
+                pushLocation()
             }
         }
         override fun onProviderEnabled(provider: String) {}
@@ -298,8 +300,18 @@ class MockLocationService : Service() {
         pushCount = 0
         consecutivePushFailures = 0  // v1.18
 
-        // v1.23: 先注册真实定位监听器，再burst push
-        // 确保任何真实GPS更新被立即拦截和覆盖
+        // v1.24: Burst push 15次（v1.22=10次，v1.23=30次，取中间值）
+        // 洪泛系统模拟位置，确保getLastKnownLocation返回模拟位置
+        for (i in 1..15) {
+            pushLocation()
+        }
+        Log.d("MockService", "Burst push done (15x), continuous push starting")
+
+        // v1.24: Burst后刷新LastKnownLocation缓存
+        flushLastKnownLocation()
+
+        // v1.24: 注册真实定位监听器（v1.22顺序：burst之后注册）
+        // 避免监听器在burst期间触发干扰
         try {
             if (gpsOk) {
                 locationManager.requestLocationUpdates(
@@ -316,16 +328,6 @@ class MockLocationService : Service() {
         } catch (e: SecurityException) {
             Log.d("MockService", "Listener registration failed: ${e.message}")
         }
-
-        // v1.23: Burst push 30次，使用精确坐标(无漂移)
-        // 洪泛系统模拟位置，确保getLastKnownLocation立即返回模拟位置
-        for (i in 1..30) {
-            pushLocation(false)
-        }
-        Log.d("MockService", "Burst push done (30x exact), continuous push starting")
-
-        // v1.23: 刷新LastKnownLocation缓存为模拟位置
-        flushLastKnownLocation()
 
         locationHandler.post(pushRunnable)
         return true
@@ -386,7 +388,7 @@ class MockLocationService : Service() {
         }
     }
 
-    private fun pushLocation(useDrift: Boolean = true) {
+    private fun pushLocation() {
         if (!isRunning) return
         pushCount++
 
@@ -398,24 +400,31 @@ class MockLocationService : Service() {
             Pair(currentLat, currentLng)
         }
 
-        // v1.23: useDrift=false时推送精确坐标(启动阶段和真实定位拦截时)
-        val (finalLat, finalLng) = if (useDrift) {
-            LocationHooks.applyDrift(pushLat, pushLng)
-        } else {
-            Pair(pushLat, pushLng)
-        }
+        val (driftedLat, driftedLng) = LocationHooks.applyDrift(pushLat, pushLng)
 
-        pushToProvider(GPS_PROVIDER, gpsRegistered, finalLat, finalLng)
-        pushToProvider(NETWORK_PROVIDER, networkRegistered, finalLat, finalLng)
-        pushToProvider(FUSED_PROVIDER, fusedRegistered, finalLat, finalLng)
-        pushToProvider(PASSIVE_PROVIDER, passiveRegistered, finalLat, finalLng)
+        pushToProvider(GPS_PROVIDER, gpsRegistered, driftedLat, driftedLng)
+        pushToProvider(NETWORK_PROVIDER, networkRegistered, driftedLat, driftedLng)
+        pushToProvider(FUSED_PROVIDER, fusedRegistered, driftedLat, driftedLng)
+        pushToProvider(PASSIVE_PROVIDER, passiveRegistered, driftedLat, driftedLng)
 
         LocationHooks.updateLastPosition(currentLat, currentLng)
 
-        // v1.23: 移除周期性setTestProviderEnabled调用
-        // 原代码每20次推送(1秒)调用setTestProviderEnabled，可能导致provider短暂重置
-        // 使真实GPS趁虚而入，造成5-60秒延迟
-        // pushToProvider内部已有失败重注册机制，无需周期性重新启用
+        // v1.24: 恢复周期性setTestProviderEnabled（v1.23移除后导致来回刷新）
+        // 这是保持test provider存活的关键！系统可能悄悄禁用test provider
+        // 移除后会导致真实GPS趁虚而入，造成浙政钉失败+百度地图来回跳
+        if (pushCount % 20 == 0L) {
+            for (provider in listOf(GPS_PROVIDER, NETWORK_PROVIDER, FUSED_PROVIDER, PASSIVE_PROVIDER)) {
+                val registered = when (provider) {
+                    GPS_PROVIDER -> gpsRegistered
+                    NETWORK_PROVIDER -> networkRegistered
+                    FUSED_PROVIDER -> fusedRegistered
+                    else -> passiveRegistered
+                }
+                if (registered) {
+                    try { locationManager.setTestProviderEnabled(provider, true) } catch (_: Exception) {}
+                }
+            }
+        }
 
         if (pushCount % 50 == 0L) {
             updateNotification()
@@ -537,7 +546,7 @@ class MockLocationService : Service() {
     private fun buildNotification(): Notification {
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("依依模拟 v1.23 运行中")
+            .setContentTitle("依依模拟 v1.24 运行中")
             .setContentText("坐标: $coordSys | 正在提供位置信息")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setOngoing(true)
@@ -567,7 +576,7 @@ class MockLocationService : Service() {
 
         val coordSys = if (useGcj02) "GCJ-02" else "WGS-84"
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("依依模拟 v1.23")
+            .setContentTitle("依依模拟 v1.24")
             .setContentText("[$coordSys] ${pushCount}次 [$providerInfo] " +
                     "%.4f, %.4f".format(currentLat, currentLng))
             .setSmallIcon(android.R.drawable.ic_menu_compass)

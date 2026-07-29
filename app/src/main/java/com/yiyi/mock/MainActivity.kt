@@ -159,7 +159,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "YiYiMock/1.23"
+            userAgentValue = "YiYiMock/1.24"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -167,7 +167,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.tvTitle.text = "依依模拟 v1.23"
+        binding.tvTitle.text = "依依模拟 v1.24"
 
         // v1.23: 请求通知权限（Android 13+ 必需，否则通知栏不显示）
         requestNotificationPermission()
@@ -717,7 +717,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "YiYiMock/1.23")
+            conn.setRequestProperty("User-Agent", "YiYiMock/1.24")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -766,7 +766,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "YiYiMock/1.23")
+            conn.setRequestProperty("User-Agent", "YiYiMock/1.24")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -1051,7 +1051,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("重要：后台保活设置")
                 .setMessage(
-                    "v1.23 后台保活设置\n\n" +
+                    "v1.24 后台保活设置\n\n" +
                     "模拟定位在后台被覆盖的原因：\n" +
                     "Android系统会冻结后台Service的CPU，\n" +
                     "导致位置推送停止，被真实GPS覆盖。\n\n" +
@@ -1090,7 +1090,7 @@ class MainActivity : AppCompatActivity() {
                     "1. 关闭WiFi\n" +
                     "2. 关闭WiFi扫描\n" +
                     "   (设置-位置信息-Wi-Fi扫描-关闭)\n\n" +
-                    "v1.23已修正坐标系偏移(WGS-84)，\n" +
+                    "v1.24已修正坐标系偏移(WGS-84)，\n" +
                     "关闭WiFi后定位应更准确。"
                 )
                 .setPositiveButton("已关闭，开始模拟") { _, _ ->
@@ -1174,23 +1174,21 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v23", false)) return
-        prefs.edit().putBoolean("mock_tips_v23", true).apply()
+        if (prefs.getBoolean("mock_tips_v24", false)) return
+        prefs.edit().putBoolean("mock_tips_v24", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.23")
+            .setTitle("模拟已启动 - v1.24")
             .setMessage(
-                "v1.23 核心改进：\n\n" +
-                "1. 修复定位延迟！\n" +
-                "   真实监听器提前注册\n" +
-                "   burst push增强至30次\n" +
-                "   移除导致provider重置的\n" +
-                "   周期性setTestProviderEnabled\n\n" +
-                "2. 修复按钮卡死！\n" +
-                "   权限检查移至后台线程\n" +
-                "   不再阻塞UI\n\n" +
-                "3. 精确坐标stabilization\n" +
-                "   前100次推送不漂移\n" +
-                "   确保模拟位置精确覆盖\n\n" +
+                "v1.24 核心改进：\n\n" +
+                "1. 回退稳定性修复！\n" +
+                "   恢复周期性provider保活\n" +
+                "   解决真实/模拟来回刷新\n\n" +
+                "2. 修复浙政钉兼容性\n" +
+                "   监听器在burst后注册\n" +
+                "   避免启动竞态导致失败\n\n" +
+                "3. Burst push调整\n" +
+                "   v1.22=10次 → v1.24=15次\n" +
+                "   平衡速度与稳定性\n\n" +
                 "4. LastKnownLocation刷新\n" +
                 "   burst后立即刷新缓存\n" +
                 "   签到APP秒读模拟位置\n\n" +
