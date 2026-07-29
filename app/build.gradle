@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace 'com.yiyi.mock'
+    namespace 'com.ningning.mock'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.yiyi.mock"
+        applicationId "com.ningning.mock"
         minSdk 23
         targetSdk 34
         versionCode 34
@@ -45,7 +45,7 @@ android {
     applicationVariants.all { variant ->
         variant.outputs.all {
             def version = variant.versionName
-            outputFileName = "YiYiMock-v${version}.apk"
+            outputFileName = "NingNingMock-v${version}.apk"
         }
     }
 }
