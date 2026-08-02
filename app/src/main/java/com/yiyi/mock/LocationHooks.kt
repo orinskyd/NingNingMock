@@ -1,4 +1,4 @@
-package com.ningning.mock
+package com.yiyi.mock
 
 import android.location.Location
 import android.os.Bundle

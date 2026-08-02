@@ -1,4 +1,4 @@
-package com.ningning.mock
+package com.yiyi.mock
 
 import android.Manifest
 import android.content.ComponentName
@@ -23,7 +23,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.ningning.mock.databinding.ActivityMainBinding
+import com.yiyi.mock.databinding.ActivityMainBinding
 import org.json.JSONArray
 import org.json.JSONObject
 import org.osmdroid.config.Configuration
@@ -159,7 +159,7 @@ class MainActivity : AppCompatActivity() {
         amapKey = prefs.getString("amap_key", DEFAULT_AMAP_KEY) ?: DEFAULT_AMAP_KEY
 
         Configuration.getInstance().apply {
-            userAgentValue = "NingNingMock/1.24"
+            userAgentValue = "YiYiMock/1.25"
             osmdroidBasePath = filesDir
             osmdroidTileCache = cacheDir
         }
@@ -167,7 +167,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        binding.tvTitle.text = "宁宁模拟 v1.24"
+        binding.tvTitle.text = "依依模拟 v1.25"
 
         // v1.23: 请求通知权限（Android 13+ 必需，否则通知栏不显示）
         requestNotificationPermission()
@@ -319,10 +319,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // === v1.20: 坐标系推送开关 ===
-        // 默认 WGS-84（正确方式，修复高德/百度600米偏移）
-        // 开启 GCJ-02 推送适用于部分不转坐标的钉钉版本
-        binding.switchGcj02.isChecked = prefs.getBoolean("gcj02_push", false)
+        // === v1.25: 坐标系推送开关 ===
+        // 默认 GCJ-02（钉钉/百度地图等国内APP交叉验证需要GCJ-02匹配网络定位）
+        // 关闭GCJ-02可切换WGS-84（适用于非中国APP，会有约500米偏移）
+        binding.switchGcj02.isChecked = prefs.getBoolean("gcj02_push", true)
         binding.switchGcj02.setOnCheckedChangeListener { _, isChecked ->
             prefs.edit().putBoolean("gcj02_push", isChecked).apply()
             val mode = if (isChecked) "GCJ-02" else "WGS-84"
@@ -717,7 +717,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 10000
             conn.readTimeout = 10000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.24")
+            conn.setRequestProperty("User-Agent", "YiYiMock/1.25")
             val responseCode = conn.responseCode
 
             if (responseCode != 200) {
@@ -766,7 +766,7 @@ class MainActivity : AppCompatActivity() {
             val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
             conn.connectTimeout = 8000
             conn.readTimeout = 8000
-            conn.setRequestProperty("User-Agent", "NingNingMock/1.24")
+            conn.setRequestProperty("User-Agent", "YiYiMock/1.25")
             val body = conn.inputStream.bufferedReader().readText()
 
             if (!body.contains("\"status\":\"1\"") || !body.contains("\"geocodes\"")) {
@@ -955,49 +955,49 @@ class MainActivity : AppCompatActivity() {
         return when {
             brand.contains("huawei") || brand.contains("honor") ->
                 "【华为/荣耀手机】\n" +
-                "1. 设置→应用→应用管理→宁宁模拟\n" +
+                "1. 设置→应用→应用管理→依依模拟\n" +
                 "   →电池→选择\"不受限制\"\n" +
                 "2. 设置→应用→应用启动管理\n" +
-                "   →宁宁模拟→关闭\"自动管理\"\n" +
+                "   →依依模拟→关闭\"自动管理\"\n" +
                 "   →开启全部三个开关\n" +
-                "3. 在最近任务列表中，下拉宁宁模拟加锁"
+                "3. 在最近任务列表中，下拉依依模拟加锁"
 
             brand.contains("xiaomi") || brand.contains("redmi") ->
                 "【小米/红米手机】\n" +
-                "1. 设置→应用设置→应用管理→宁宁模拟\n" +
+                "1. 设置→应用设置→应用管理→依依模拟\n" +
                 "   →省电策略→选择\"无限制\"\n" +
                 "2. 安全中心→应用管理→权限\n" +
-                "   →宁宁模拟→自启动→允许\n" +
-                "3. 在最近任务列表中，长按宁宁模拟→加锁"
+                "   →依依模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，长按依依模拟→加锁"
 
             brand.contains("oppo") || brand.contains("realme") ->
                 "【OPPO/真我手机】\n" +
-                "1. 设置→电池→应用耗电管理→宁宁模拟\n" +
+                "1. 设置→电池→应用耗电管理→依依模拟\n" +
                 "   →允许后台运行\n" +
-                "2. 设置→应用管理→宁宁模拟\n" +
+                "2. 设置→应用管理→依依模拟\n" +
                 "   →自启动→允许自启动\n" +
-                "3. 在最近任务列表中，下拉宁宁模拟加锁"
+                "3. 在最近任务列表中，下拉依依模拟加锁"
 
             brand.contains("vivo") ->
                 "【vivo手机】\n" +
-                "1. 设置→电池→后台耗电管理→宁宁模拟\n" +
+                "1. 设置→电池→后台耗电管理→依依模拟\n" +
                 "   →允许后台高耗电\n" +
                 "2. i管家→应用管理→权限管理\n" +
-                "   →宁宁模拟→自启动→允许\n" +
-                "3. 在最近任务列表中，下拉宁宁模拟加锁"
+                "   →依依模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，下拉依依模拟加锁"
 
             brand.contains("samsung") ->
                 "【三星手机】\n" +
-                "1. 设置→应用程序→宁宁模拟→电池\n" +
+                "1. 设置→应用程序→依依模拟→电池\n" +
                 "   →选择\"不受限制\"\n" +
                 "2. 设置→电池和设备维护→自动优化\n" +
-                "   →关闭（或添加宁宁模拟到排除列表）"
+                "   →关闭（或添加依依模拟到排除列表）"
 
             else ->
                 "【通用设置】\n" +
-                "1. 设置→电池→宁宁模拟→不受限制\n" +
-                "2. 设置→应用→宁宁模拟→自启动→允许\n" +
-                "3. 在最近任务列表中，给宁宁模拟加锁\n" +
+                "1. 设置→电池→依依模拟→不受限制\n" +
+                "2. 设置→应用→依依模拟→自启动→允许\n" +
+                "3. 在最近任务列表中，给依依模拟加锁\n" +
                 "（不同品牌设置路径可能不同）"
         }
     }
@@ -1030,7 +1030,7 @@ class MainActivity : AppCompatActivity() {
                             "2. 找到「开发者选项」\n" +
                             "   （如果没有：设置-关于手机-连续点击「版本号」7次）\n" +
                             "3. 找到「选择模拟位置信息应用」\n" +
-                            "4. 选择「宁宁模拟」\n\n" +
+                            "4. 选择「依依模拟」\n\n" +
                             "设置完成后返回本APP重新操作。"
                         )
                         .setPositiveButton("去开发者选项") { _, _ ->
@@ -1051,7 +1051,7 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this)
                 .setTitle("重要：后台保活设置")
                 .setMessage(
-                    "v1.24 后台保活设置\n\n" +
+                    "v1.25 后台保活设置\n\n" +
                     "模拟定位在后台被覆盖的原因：\n" +
                     "Android系统会冻结后台Service的CPU，\n" +
                     "导致位置推送停止，被真实GPS覆盖。\n\n" +
@@ -1090,7 +1090,7 @@ class MainActivity : AppCompatActivity() {
                     "1. 关闭WiFi\n" +
                     "2. 关闭WiFi扫描\n" +
                     "   (设置-位置信息-Wi-Fi扫描-关闭)\n\n" +
-                    "v1.24已修正坐标系偏移(WGS-84)，\n" +
+                    "v1.25默认GCJ-02坐标系推送，\n" +
                     "关闭WiFi后定位应更准确。"
                 )
                 .setPositiveButton("已关闭，开始模拟") { _, _ ->
@@ -1119,9 +1119,9 @@ class MainActivity : AppCompatActivity() {
             .putString("last_name", locationName)
             .apply()
 
-        // v1.20: 默认推送 WGS-84（修复高德/百度600米偏移）
-        // 用户可通过开关切换为 GCJ-02（部分钉钉版本需要）
-        val useGcj02 = prefs.getBoolean("gcj02_push", false)
+        // v1.25: 默认推送 GCJ-02（国内APP交叉验证GPS与网络定位需要GCJ-02匹配）
+        // 用户可关闭切换WGS-84（适用于非中国APP）
+        val useGcj02 = prefs.getBoolean("gcj02_push", true)
         val intent = Intent(this, MockLocationService::class.java).apply {
             putExtra(MockLocationService.EXTRA_LAT, selectedLat)
             putExtra(MockLocationService.EXTRA_LNG, selectedLng)
@@ -1156,7 +1156,7 @@ class MainActivity : AppCompatActivity() {
                 "1. 打开 设置 - 系统 - 开发者选项\n" +
                 "   （如果没有：设置 - 关于手机 - 连续点击版本号7次）\n" +
                 "2. 找到「选择模拟位置信息应用」\n" +
-                "3. 选择「宁宁模拟」\n" +
+                "3. 选择「依依模拟」\n" +
                 "4. 返回本APP，重新点击「开始模拟」"
             error.contains("Provider注册异常") ->
                 "Provider注册出错：\n$error\n\n建议重启手机后再试。"
@@ -1174,27 +1174,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showMockTips() {
-        if (prefs.getBoolean("mock_tips_v24", false)) return
-        prefs.edit().putBoolean("mock_tips_v24", true).apply()
+        if (prefs.getBoolean("mock_tips_v25", false)) return
+        prefs.edit().putBoolean("mock_tips_v25", true).apply()
         AlertDialog.Builder(this)
-            .setTitle("模拟已启动 - v1.24")
+            .setTitle("模拟已启动 - v1.25")
             .setMessage(
-                "v1.24 核心改进：\n\n" +
-                "1. 回退稳定性修复！\n" +
-                "   恢复周期性provider保活\n" +
+                "v1.25 核心改进：\n\n" +
+                "1. 默认GCJ-02坐标系！\n" +
+                "   解决钉钉/百度地图失效\n" +
+                "   GPS与网络定位坐标匹配\n\n" +
+                "2. 回退v1.22稳定定位逻辑\n" +
+                "   周期性provider保活\n" +
                 "   解决真实/模拟来回刷新\n\n" +
-                "2. 修复浙政钉兼容性\n" +
-                "   监听器在burst后注册\n" +
-                "   避免启动竞态导致失败\n\n" +
-                "3. Burst push调整\n" +
-                "   v1.22=10次 → v1.24=15次\n" +
+                "3. Burst push 15次\n" +
                 "   平衡速度与稳定性\n\n" +
                 "4. LastKnownLocation刷新\n" +
-                "   burst后立即刷新缓存\n" +
                 "   签到APP秒读模拟位置\n\n" +
                 "使用建议：\n" +
                 "1. 模拟后等待2秒再打开签到\n" +
-                "2. 默认WGS-84模式即可\n" +
+                "2. 默认GCJ-02模式即可\n" +
                 "3. 模拟后APP自动进入后台\n" +
                 "4. 下拉通知栏可点\"停止\"结束"
             )
@@ -1270,7 +1268,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnStartMock.text = "停止模拟"
             binding.btnStartMock.setBackgroundColor(getColor(android.R.color.holo_red_dark))
             binding.tvStatusBar.text = "模拟中"
-            binding.tvStatusBar.setTextColor(0xFF1565C0.toInt())
+            binding.tvStatusBar.setTextColor(0xFF9C27B0.toInt())
             binding.cardSelected.visibility = View.VISIBLE
 
             val coordSys = if (prefs.getBoolean("gcj02_push", false)) "GCJ-02" else "WGS-84(标准GPS)"
@@ -1280,7 +1278,7 @@ class MainActivity : AppCompatActivity() {
             binding.btnStartMock.setOnClickListener { stopMocking() }
         } else {
             binding.btnStartMock.text = "开始模拟"
-            binding.btnStartMock.setBackgroundColor(0xFF1565C0.toInt())
+            binding.btnStartMock.setBackgroundColor(0xFF9C27B0.toInt())
             binding.tvStatusBar.text = "就绪"
             binding.tvStatusBar.setTextColor(getColor(android.R.color.darker_gray))
             binding.tvStatus.text = ""
